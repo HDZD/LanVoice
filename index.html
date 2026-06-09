@@ -1,0 +1,2715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LanVoice — P2P Voice Chat</title>
+    <meta name="description" content="Free peer-to-peer voice chat. Create a room, share the link, talk. No accounts, no downloads, no servers.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+    /* =============================================
+       RESET & CUSTOM PROPERTIES
+       ============================================= */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep: #060810;
+      --bg-primary: #0a0e1a;
+      --bg-elevated: #111627;
+      --bg-glass: rgba(14, 18, 34, 0.85);
+      --bg-glass-light: rgba(255, 255, 255, 0.035);
+      --bg-glass-lighter: rgba(255, 255, 255, 0.065);
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.1);
+      --accent: #00d4aa;
+      --accent-bright: #00f0c0;
+      --accent-dim: rgba(0, 212, 170, 0.12);
+      --accent-2: #6366f1;
+      --accent-2-dim: rgba(99, 102, 241, 0.12);
+      --text-bright: #f1f5f9;
+      --text-primary: #cbd5e1;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --danger: #ef4444;
+      --danger-dim: rgba(239, 68, 68, 0.12);
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+      --radius-full: 9999px;
+      --t-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      --t-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      --t-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* =============================================
+       GLOBAL STYLES
+       ============================================= */
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: -50%;
+      width: 200%;
+      height: 200%;
+      background:
+        radial-gradient(ellipse at 25% 40%, rgba(99, 102, 241, 0.07) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 25%, rgba(0, 212, 170, 0.05) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 80%, rgba(139, 92, 246, 0.04) 0%, transparent 50%);
+      animation: bgShift 25s ease-in-out infinite;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    @keyframes bgShift {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      33% { transform: translate(-3%, 2%) rotate(1deg); }
+      66% { transform: translate(2%, -3%) rotate(-1deg); }
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+    /* =============================================
+       SCREEN MANAGEMENT
+       ============================================= */
+    .screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity var(--t-slow), visibility var(--t-slow);
+    }
+    .screen.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    /* =============================================
+       JOIN SCREEN
+       ============================================= */
+    .join-card {
+      background: var(--bg-glass);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-xl);
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      margin: 16px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+      animation: cardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .logo { text-align: center; margin-bottom: 36px; }
+    .logo-icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 16px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 32px rgba(0, 212, 170, 0.2);
+    }
+    .logo-icon svg { width: 32px; height: 32px; color: white; }
+
+    .logo h1 {
+      font-size: 28px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent-bright), var(--accent-2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    .logo p {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-top: 4px;
+      font-weight: 400;
+    }
+
+    .form-group { margin-bottom: 20px; }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-glass-light);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-bright);
+      font-family: var(--font);
+      font-size: 15px;
+      outline: none;
+      transition: border-color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .input::placeholder { color: var(--text-muted); }
+    .input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border: none;
+      border-radius: var(--radius-md);
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--t-fast);
+      outline: none;
+      white-space: nowrap;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #00b89c);
+      color: #000;
+      box-shadow: 0 4px 16px rgba(0, 212, 170, 0.25);
+    }
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 6px 24px rgba(0, 212, 170, 0.35);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active:not(:disabled) { transform: translateY(0); }
+
+    .btn-secondary {
+      background: var(--bg-glass-lighter);
+      color: var(--text-bright);
+      border: 1px solid var(--border-medium);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-danger {
+      background: var(--danger-dim);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.2);
+    }
+
+    .btn-full { width: 100%; }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 24px 0;
+      color: var(--text-muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-subtle);
+    }
+
+    .join-row {
+      display: flex;
+      gap: 10px;
+    }
+    .join-row .input { flex: 1; }
+
+    .error-text {
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 8px;
+      min-height: 20px;
+    }
+
+    /* =============================================
+       ROOM SCREEN
+       ============================================= */
+    #room-screen {
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+    }
+
+    .room-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-subtle);
+      z-index: 10;
+      flex-shrink: 0;
+    }
+
+    .room-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .room-code-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(0, 212, 170, 0.15);
+      border-radius: var(--radius-full);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .copy-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--bg-glass-light);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-family: var(--font);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .copy-link-btn:hover {
+      color: var(--text-bright);
+      border-color: var(--border-medium);
+      background: var(--bg-glass-lighter);
+    }
+    .copy-link-btn svg { width: 14px; height: 14px; }
+
+    .peer-count {
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .connection-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+      display: inline-block;
+      margin-right: 4px;
+    }
+
+    /* Peer Grid */
+    .peers-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px;
+      padding-bottom: 100px;
+    }
+
+    .empty-room {
+      text-align: center;
+      padding: 60px 20px;
+      animation: fadeIn 0.5s ease;
+    }
+    .empty-room-icon {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 20px;
+      background: var(--bg-glass-lighter);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
+    .empty-room-icon svg { width: 36px; height: 36px; }
+    .empty-room h3 {
+      color: var(--text-secondary);
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+    .empty-room p {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .peers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* Peer Card */
+    .peer-card {
+      background: var(--bg-glass-light);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1.5px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      transition: all var(--t-normal);
+      position: relative;
+      animation: cardPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes cardPop {
+      from { opacity: 0; transform: scale(0.9); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .peer-card:hover {
+      background: var(--bg-glass-lighter);
+      transform: translateY(-2px);
+    }
+
+    .peer-card.speaking {
+      border-color: rgba(0, 212, 170, 0.4);
+      box-shadow: 0 0 20px rgba(0, 212, 170, 0.1), 0 0 60px rgba(0, 212, 170, 0.05);
+    }
+
+    .peer-card.is-self {
+      border-color: rgba(99, 102, 241, 0.2);
+    }
+    .peer-card.is-self.speaking {
+      border-color: rgba(0, 212, 170, 0.4);
+    }
+
+    .peer-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: white;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .speaking-ring {
+      position: absolute;
+      inset: -5px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      opacity: 0;
+      transition: opacity var(--t-fast), transform var(--t-fast);
+      transform: scale(0.92);
+    }
+    .peer-card.speaking .speaking-ring {
+      opacity: 1;
+      transform: scale(1);
+      animation: pulseRing 2s ease-in-out infinite;
+    }
+
+    @keyframes pulseRing {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(0, 212, 170, 0.3); }
+      50% { box-shadow: 0 0 0 6px rgba(0, 212, 170, 0); }
+    }
+
+    .peer-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-bright);
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .peer-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-host {
+      background: rgba(251, 191, 36, 0.12);
+      color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.2);
+    }
+    .badge-you {
+      background: var(--accent-2-dim);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+    .badge-muted {
+      background: var(--danger-dim);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+
+    .badge svg { width: 12px; height: 12px; }
+
+    .kick-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--t-fast);
+      opacity: 0;
+    }
+    .peer-card:hover .kick-btn { opacity: 1; }
+    .kick-btn:hover {
+      background: var(--danger-dim);
+      border-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+    }
+    .kick-btn svg { width: 14px; height: 14px; }
+
+    /* =============================================
+       CONTROL BAR
+       ============================================= */
+    .control-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-glass);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-full);
+      padding: 10px 20px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      z-index: 20;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+      animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+
+    .ctrl-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: var(--bg-glass-lighter);
+      color: var(--text-primary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--t-fast);
+      position: relative;
+    }
+    .ctrl-btn svg { width: 20px; height: 20px; }
+    .ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--text-bright);
+    }
+
+    .ctrl-btn.active {
+      background: var(--danger-dim);
+      color: var(--danger);
+    }
+    .ctrl-btn.active:hover {
+      background: rgba(239, 68, 68, 0.2);
+    }
+
+    .ctrl-btn.leave {
+      background: var(--danger);
+      color: white;
+    }
+    .ctrl-btn.leave:hover {
+      background: #dc2626;
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+    }
+
+    .ctrl-divider {
+      width: 1px;
+      height: 24px;
+      background: var(--border-subtle);
+      margin: 0 4px;
+    }
+
+    .ctrl-btn .shortcut {
+      position: absolute;
+      bottom: -18px;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 500;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity var(--t-fast);
+    }
+    .ctrl-btn:hover .shortcut { opacity: 1; }
+
+    /* =============================================
+       SETTINGS MODAL
+       ============================================= */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+      transition: all var(--t-normal);
+    }
+    .modal-overlay.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-xl);
+      padding: 32px;
+      width: 100%;
+      max-width: 400px;
+      margin: 16px;
+      transform: scale(0.95);
+      transition: transform var(--t-normal);
+    }
+    .modal-overlay.active .modal { transform: scale(1); }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .modal-header h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: var(--bg-glass-lighter);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--t-fast);
+    }
+    .modal-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-bright);
+    }
+    .modal-close svg { width: 16px; height: 16px; }
+
+    .setting-group { margin-bottom: 20px; }
+    .setting-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .select {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--bg-glass-light);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-bright);
+      font-family: var(--font);
+      font-size: 14px;
+      outline: none;
+      appearance: none;
+      cursor: pointer;
+      transition: border-color var(--t-fast);
+    }
+    .select:focus { border-color: var(--accent); }
+
+    .range-container { display: flex; align-items: center; gap: 12px; }
+    .range-container input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      background: var(--border-subtle);
+      border-radius: 2px;
+      outline: none;
+    }
+    .range-container input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 212, 170, 0.3);
+    }
+    .range-value {
+      font-size: 13px;
+      color: var(--text-secondary);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* =============================================
+       TOAST NOTIFICATIONS
+       ============================================= */
+    .toast-container {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 12px 20px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transform: translateX(120%);
+      opacity: 0;
+      transition: all var(--t-normal);
+      pointer-events: auto;
+      max-width: 320px;
+    }
+    .toast.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    .toast-info { border-left: 3px solid var(--accent); }
+    .toast-success { border-left: 3px solid var(--success); }
+    .toast-warning { border-left: 3px solid var(--warning); }
+    .toast-error { border-left: 3px solid var(--danger); }
+
+    /* =============================================
+       LOADING SPINNER
+       ============================================= */
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* =============================================
+       RESPONSIVE
+       ============================================= */
+    @media (max-width: 768px) {
+      .join-card { padding: 32px 24px; }
+      .room-header { padding: 12px 16px; }
+      .room-info { gap: 10px; }
+      .peers-area { padding: 16px; padding-bottom: 100px; }
+      .peers-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+      .control-bar { padding: 8px 16px; }
+      .ctrl-btn { width: 40px; height: 40px; }
+    }
+
+    @media (max-width: 480px) {
+      .peers-grid { grid-template-columns: repeat(2, 1fr); }
+      .room-info { flex-wrap: wrap; gap: 8px; }
+      .peer-count { display: none; }
+    }
+
+    /* Topology badge */
+    .topology-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      transition: all var(--t-normal);
+    }
+    .topology-badge.mesh {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid rgba(0, 212, 170, 0.15);
+    }
+    .topology-badge.star {
+      background: rgba(245, 158, 11, 0.1);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.15);
+    }
+    .quality-hint {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Paranoid link */
+    .paranoid-link-wrapper {
+      text-align: center;
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .paranoid-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      transition: all var(--t-normal);
+      letter-spacing: 0.3px;
+    }
+    .paranoid-link svg {
+      width: 14px;
+      height: 14px;
+      transition: transform var(--t-normal);
+    }
+    .paranoid-link:hover {
+      color: var(--accent);
+      background: var(--accent-dim);
+      text-shadow: 0 0 12px rgba(0, 212, 170, 0.3);
+    }
+    .paranoid-link:hover svg {
+      transform: scale(1.15);
+    }
+    </style>
+</head>
+<body>
+
+    <!-- ==========================================
+         JOIN SCREEN
+         ========================================== -->
+    <div id="join-screen" class="screen active">
+        <div class="join-card">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </div>
+                <h1>LanVoice</h1>
+                <p>Peer-to-peer voice chat</p>
+            </div>
+
+            <div class="form-group">
+                <label for="username-input">Display Name</label>
+                <input type="text" id="username-input" class="input" placeholder="Enter your name" maxlength="20" autocomplete="off" spellcheck="false">
+            </div>
+
+            <button id="create-room-btn" class="btn btn-primary btn-full">
+                Create Room
+            </button>
+
+            <div class="divider">or join existing</div>
+
+            <div class="join-row">
+                <input type="text" id="room-code-input" class="input" placeholder="Room code" maxlength="10" autocomplete="off" spellcheck="false" style="text-transform: lowercase;">
+                <button id="join-room-btn" class="btn btn-secondary">Join</button>
+            </div>
+
+            <div id="join-error" class="error-text"></div>
+
+            <div class="paranoid-link-wrapper">
+                <a href="./zero-dep/" class="paranoid-link" title="Zero-dependency version — no external libraries, pure WebRTC">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    Paranoid?
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         ROOM SCREEN
+         ========================================== -->
+    <div id="room-screen" class="screen">
+        <header class="room-header">
+            <div class="room-info">
+                <div class="room-code-badge">
+                    <span class="connection-dot"></span>
+                    <span id="room-code-display">—</span>
+                </div>
+                <button id="copy-link-btn" class="copy-link-btn" title="Copy invite link">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    Copy Link
+                </button>
+                <span id="peer-count" class="peer-count"></span>
+                <span id="topology-badge" class="topology-badge mesh" title="Mesh topology — direct connections between all peers">🔗 Mesh</span>
+            </div>
+        </header>
+
+        <div class="peers-area">
+            <div id="peers-container"></div>
+        </div>
+
+        <div class="control-bar">
+            <button id="mic-btn" class="ctrl-btn" title="Toggle Microphone (M)">
+                <span class="shortcut">M</span>
+            </button>
+            <button id="deafen-btn" class="ctrl-btn" title="Toggle Deafen (D)">
+                <span class="shortcut">D</span>
+            </button>
+            <div class="ctrl-divider"></div>
+            <button id="settings-btn" class="ctrl-btn" title="Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </button>
+            <div class="ctrl-divider"></div>
+            <button id="leave-btn" class="ctrl-btn leave" title="Leave Room">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 2.59 3.4z"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         SETTINGS MODAL
+         ========================================== -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button id="settings-close" class="modal-close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="setting-group">
+                <label for="input-device">Microphone</label>
+                <select id="input-device" class="select"></select>
+            </div>
+            <div class="setting-group">
+                <label>Master Volume</label>
+                <div class="range-container">
+                    <input type="range" id="volume-slider" min="0" max="100" value="100">
+                    <span id="volume-value" class="range-value">100%</span>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="quality-select">Audio Quality</label>
+                <select id="quality-select" class="select">
+                    <option value="max" selected>Max (128 kbps)</option>
+                    <option value="high">High (64 kbps)</option>
+                    <option value="medium">Medium (32 kbps)</option>
+                    <option value="low">Low (16 kbps)</option>
+                    <option value="ultralow">Ultra Low (8 kbps)</option>
+                </select>
+                <span class="quality-hint">Lower quality = less bandwidth. Both send &amp; receive are adjusted.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- ==========================================
+         SCRIPTS
+         ========================================== -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script>
+    (function() {
+    'use strict';
+
+    /* ===========================================
+       SVG ICON TEMPLATES
+       =========================================== */
+    const ICON = {
+      mic: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+      micOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.35 2.17"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+      headphones: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`,
+      headphonesOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
+      crown: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M2.5 18.5l2-11 5.5 4 2-6 2 6 5.5-4 2 11z"/></svg>`,
+      x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+      users: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    };
+
+    /* ===========================================
+       CONFIGURATION
+       =========================================== */
+    const CONFIG = {
+      ROOM_PREFIX: 'lv-',
+      SPEAKING_THRESHOLD: 12,
+      SPEAKING_RELEASE_MS: 350,
+      HEARTBEAT_INTERVAL: 15000,
+      STAR_THRESHOLD: 5,
+      SPEAK_BROADCAST_HZ: 6,
+      JOIN_TIMEOUT: 12000,
+      PEER_OPTIONS: {
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ]
+        }
+      },
+      AUDIO_CONSTRAINTS: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      CHARSET: 'abcdefghjkmnpqrstuvwxyz23456789',
+      QUALITY_PRESETS: {
+        max:     { label: 'Max (128 kbps)',  bitrate: 128000 },
+        high:    { label: 'High (64 kbps)',  bitrate: 64000 },
+        medium:  { label: 'Medium (32 kbps)', bitrate: 32000 },
+        low:     { label: 'Low (16 kbps)',   bitrate: 16000 },
+        ultralow:{ label: 'Ultra Low (8 kbps)',bitrate: 8000 },
+      },
+    };
+
+    /* ===========================================
+       APPLICATION STATE
+       =========================================== */
+    const state = {
+      username: '',
+      roomCode: '',
+      myPeerId: null,
+      joinTime: 0,
+      hostId: null,
+      isMuted: false,
+      isDeafened: false,
+      masterVolume: 1,
+      audioQuality: 'max',
+      localStream: null,
+      personalPeer: null,
+      doorPeer: null,
+      peers: new Map(),       // peerId → { username, joinTime, isMuted, isSpeaking, dataConn, mediaConn, audioEl, analyser, analyserData, speakTimeout }
+      localAnalyser: null,
+      localAnalyserData: null,
+      localSpeaking: false,
+      localSpeakTimeout: null,
+      audioContext: null,
+      animFrameId: null,
+      isInRoom: false,
+      topology: 'mesh',
+      starHostId: null,
+      switchingTopology: false,
+      pendingPings: new Map(),
+      latencyScores: new Map(),
+      mixerCtx: null,
+      mixSources: new Map(),
+      mixDests: new Map(),
+      speakBroadcastCounter: 0,
+    };
+
+    /* ===========================================
+       UTILITY FUNCTIONS
+       =========================================== */
+    function generateCode(len = 6) {
+      let code = '';
+      const arr = crypto.getRandomValues(new Uint8Array(len));
+      for (let i = 0; i < len; i++) code += CONFIG.CHARSET[arr[i] % CONFIG.CHARSET.length];
+      return code;
+    }
+
+    function sanitizeCode(raw) {
+      return raw.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10);
+    }
+
+    function doorId(code) {
+      return CONFIG.ROOM_PREFIX + code;
+    }
+
+    function getInitial(name) {
+      return (name || '?').charAt(0).toUpperCase();
+    }
+
+    function hashStr(s) {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h);
+      return h;
+    }
+
+    function avatarGradient(name) {
+      const h1 = Math.abs(hashStr(name) % 360);
+      const h2 = (h1 + 45) % 360;
+      return `linear-gradient(135deg, hsl(${h1}, 65%, 50%), hsl(${h2}, 60%, 40%))`;
+    }
+
+    /* ===========================================
+       SOUND EFFECTS (Generated via Web Audio)
+       =========================================== */
+    function playTone(freq, dur, vol = 0.08) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.value = vol;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+        osc.stop(ctx.currentTime + dur);
+        setTimeout(() => ctx.close(), dur * 1000 + 200);
+      } catch(_) {}
+    }
+
+    function playJoinSound() { playTone(880, 0.15); setTimeout(() => playTone(1100, 0.12), 100); }
+    function playLeaveSound() { playTone(600, 0.15); setTimeout(() => playTone(440, 0.18), 100); }
+
+    /* ===========================================
+       TOAST NOTIFICATIONS
+       =========================================== */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add('show')));
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    /* ===========================================
+       UI RENDERING
+       =========================================== */
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    function showScreen(id) {
+      $$('.screen').forEach(s => s.classList.remove('active'));
+      $(`#${id}`).classList.add('active');
+    }
+
+    function updateMicButton() {
+      const btn = $('#mic-btn');
+      btn.innerHTML = (state.isMuted ? ICON.micOff : ICON.mic) + '<span class="shortcut">M</span>';
+      btn.classList.toggle('active', state.isMuted);
+      btn.title = state.isMuted ? 'Unmute (M)' : 'Mute (M)';
+    }
+
+    function updateDeafenButton() {
+      const btn = $('#deafen-btn');
+      btn.innerHTML = (state.isDeafened ? ICON.headphonesOff : ICON.headphones) + '<span class="shortcut">D</span>';
+      btn.classList.toggle('active', state.isDeafened);
+      btn.title = state.isDeafened ? 'Undeafen (D)' : 'Deafen (D)';
+    }
+
+    function updateRoomInfo() {
+      $('#room-code-display').textContent = state.roomCode.toUpperCase();
+      const total = state.peers.size + 1;
+      $('#peer-count').textContent = `${total} ${total === 1 ? 'person' : 'people'}`;
+    }
+
+    function renderPeers() {
+      const container = $('#peers-container');
+      const allPeers = [];
+
+      // Self card
+      allPeers.push({
+        id: 'self',
+        username: state.username,
+        isMuted: state.isMuted,
+        isSpeaking: state.localSpeaking,
+        isHost: state.hostId === state.myPeerId,
+        isSelf: true,
+      });
+
+      // Remote peers
+      for (const [pid, p] of state.peers) {
+        allPeers.push({
+          id: pid,
+          username: p.username || 'Connecting...',
+          isMuted: p.isMuted,
+          isSpeaking: p.isSpeaking,
+          isHost: state.hostId === pid,
+          isSelf: false,
+        });
+      }
+
+      if (allPeers.length === 1) {
+        container.innerHTML = `
+          <div class="empty-room">
+            <div class="empty-room-icon">${ICON.users}</div>
+            <h3>Waiting for others...</h3>
+            <p>Share the room link to invite people</p>
+          </div>`;
+        // Still render self card below the message
+        const grid = document.createElement('div');
+        grid.className = 'peers-grid';
+        grid.innerHTML = buildPeerCard(allPeers[0]);
+        container.appendChild(grid);
+        return;
+      }
+
+      const grid = document.createElement('div');
+      grid.className = 'peers-grid';
+      grid.innerHTML = allPeers.map(buildPeerCard).join('');
+      container.innerHTML = '';
+      container.appendChild(grid);
+
+      // Attach kick handlers
+      const amHost = state.hostId === state.myPeerId;
+      if (amHost) {
+        container.querySelectorAll('.kick-btn').forEach(btn => {
+          btn.addEventListener('click', () => kickPeer(btn.dataset.peerId));
+        });
+      }
+    }
+
+    function buildPeerCard(p) {
+      const classes = ['peer-card'];
+      if (p.isSpeaking && !p.isMuted) classes.push('speaking');
+      if (p.isSelf) classes.push('is-self');
+
+      const badges = [];
+      if (p.isHost) badges.push(`<span class="badge badge-host">${ICON.crown} Host</span>`);
+      if (p.isSelf) badges.push(`<span class="badge badge-you">You</span>`);
+      if (p.isMuted) badges.push(`<span class="badge badge-muted">${ICON.micOff} Muted</span>`);
+
+      const canKick = !p.isSelf && state.hostId === state.myPeerId;
+      const kickHtml = canKick ? `<button class="kick-btn" data-peer-id="${p.id}" title="Kick">${ICON.x}</button>` : '';
+
+      return `
+        <div class="${classes.join(' ')}" data-peer-id="${p.id}">
+          ${kickHtml}
+          <div class="peer-avatar" style="background: ${avatarGradient(p.username)}">
+            <div class="speaking-ring"></div>
+            ${getInitial(p.username)}
+          </div>
+          <div class="peer-name" title="${p.username}">${p.username}</div>
+          <div class="peer-badges">${badges.join('')}</div>
+        </div>`;
+    }
+
+    function updatePeerSpeaking(peerId, speaking) {
+      const card = $(`.peer-card[data-peer-id="${peerId}"]`);
+      if (!card) return;
+      // Don't show speaking ring if muted
+      const isMuted = peerId === 'self' ? state.isMuted : state.peers.get(peerId)?.isMuted;
+      card.classList.toggle('speaking', speaking && !isMuted);
+    }
+
+    /* ===========================================
+       AUDIO MANAGEMENT
+       =========================================== */
+    async function initAudio() {
+      try {
+        state.localStream = await navigator.mediaDevices.getUserMedia({ audio: CONFIG.AUDIO_CONSTRAINTS });
+        state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // Local analyser for speaking detection
+        const source = state.audioContext.createMediaStreamSource(state.localStream);
+        state.localAnalyser = state.audioContext.createAnalyser();
+        state.localAnalyser.fftSize = 256;
+        state.localAnalyserData = new Uint8Array(state.localAnalyser.frequencyBinCount);
+        source.connect(state.localAnalyser);
+        return true;
+      } catch (err) {
+        console.warn('Mic access denied:', err);
+        showToast('Microphone access denied — joining in listen-only mode', 'warning');
+        return false;
+      }
+    }
+
+    function setupRemoteAudio(peerId, stream) {
+      const peer = state.peers.get(peerId);
+      if (!peer) return;
+
+      // Audio element for playback
+      const audio = new Audio();
+      audio.srcObject = stream;
+      audio.volume = state.masterVolume;
+      audio.play().catch(() => {});
+      peer.audioEl = audio;
+
+      // Analyser for speaking detection
+      if (state.audioContext) {
+        try {
+          const source = state.audioContext.createMediaStreamSource(stream);
+          peer.analyser = state.audioContext.createAnalyser();
+          peer.analyser.fftSize = 256;
+          peer.analyserData = new Uint8Array(peer.analyser.frequencyBinCount);
+          source.connect(peer.analyser);
+        } catch(e) {
+          console.warn('Could not create analyser for peer', peerId, e);
+        }
+      }
+    }
+
+    function startAudioMonitoring() {
+      function loop() {
+        // Local speaking
+        if (state.localAnalyser && !state.isMuted) {
+          state.localAnalyser.getByteFrequencyData(state.localAnalyserData);
+          const avg = state.localAnalyserData.reduce((a, b) => a + b, 0) / state.localAnalyserData.length;
+          setSpeaking('self', avg > CONFIG.SPEAKING_THRESHOLD);
+        } else {
+          setSpeaking('self', false);
+        }
+
+        // Remote peers speaking (mesh mode only — star uses broadcast)
+        if (state.topology === 'mesh') {
+          for (const [pid, p] of state.peers) {
+            if (p.analyser) {
+              p.analyser.getByteFrequencyData(p.analyserData);
+              const avg = p.analyserData.reduce((a, b) => a + b, 0) / p.analyserData.length;
+              setSpeaking(pid, avg > CONFIG.SPEAKING_THRESHOLD);
+            }
+          }
+        }
+
+        // Star host: broadcast speaking status at reduced rate
+        if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+          state.speakBroadcastCounter++;
+          if (state.speakBroadcastCounter % CONFIG.SPEAK_BROADCAST_HZ === 0) {
+            broadcastSpeakingStatus();
+          }
+        }
+
+        state.animFrameId = requestAnimationFrame(loop);
+      }
+      state.animFrameId = requestAnimationFrame(loop);
+    }
+
+    function setSpeaking(id, speaking) {
+      if (id === 'self') {
+        if (speaking) {
+          clearTimeout(state.localSpeakTimeout);
+          if (!state.localSpeaking) {
+            state.localSpeaking = true;
+            updatePeerSpeaking('self', true);
+          }
+        } else if (state.localSpeaking) {
+          if (!state.localSpeakTimeout) {
+            state.localSpeakTimeout = setTimeout(() => {
+              state.localSpeaking = false;
+              state.localSpeakTimeout = null;
+              updatePeerSpeaking('self', false);
+            }, CONFIG.SPEAKING_RELEASE_MS);
+          }
+        }
+      } else {
+        const p = state.peers.get(id);
+        if (!p) return;
+        if (speaking) {
+          clearTimeout(p.speakTimeout);
+          if (!p.isSpeaking) {
+            p.isSpeaking = true;
+            updatePeerSpeaking(id, true);
+          }
+        } else if (p.isSpeaking) {
+          if (!p.speakTimeout) {
+            p.speakTimeout = setTimeout(() => {
+              p.isSpeaking = false;
+              p.speakTimeout = null;
+              updatePeerSpeaking(id, false);
+            }, CONFIG.SPEAKING_RELEASE_MS);
+          }
+        }
+      }
+    }
+
+    function toggleMute() {
+      state.isMuted = !state.isMuted;
+      if (state.localStream) {
+        state.localStream.getAudioTracks().forEach(t => t.enabled = !state.isMuted);
+      }
+      updateMicButton();
+      broadcastToAll({ type: 'mute-status', isMuted: state.isMuted });
+      renderPeers();
+    }
+
+    function toggleDeafen() {
+      state.isDeafened = !state.isDeafened;
+      for (const [, p] of state.peers) {
+        if (p.audioEl) p.audioEl.volume = state.isDeafened ? 0 : state.masterVolume;
+      }
+      updateDeafenButton();
+    }
+
+    function setMasterVolume(vol) {
+      state.masterVolume = vol;
+      for (const [, p] of state.peers) {
+        if (p.audioEl) p.audioEl.volume = state.isDeafened ? 0 : vol;
+      }
+    }
+
+    async function populateAudioDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        const select = $('#input-device');
+        select.innerHTML = mics.map((d, i) =>
+          `<option value="${d.deviceId}">${d.label || `Microphone ${i + 1}`}</option>`
+        ).join('');
+      } catch(_) {}
+    }
+
+    async function switchMicrophone(deviceId) {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          audio: { ...CONFIG.AUDIO_CONSTRAINTS, deviceId: { exact: deviceId } }
+        });
+        const oldStream = state.localStream;
+        state.localStream = newStream;
+
+        // Update local analyser
+        if (state.audioContext && state.localAnalyser) {
+          const source = state.audioContext.createMediaStreamSource(newStream);
+          state.localAnalyser = state.audioContext.createAnalyser();
+          state.localAnalyser.fftSize = 256;
+          state.localAnalyserData = new Uint8Array(state.localAnalyser.frequencyBinCount);
+          source.connect(state.localAnalyser);
+        }
+
+        // Replace track in all peer connections
+        const newTrack = newStream.getAudioTracks()[0];
+        for (const [, p] of state.peers) {
+          if (p.mediaConn && p.mediaConn.peerConnection) {
+            const sender = p.mediaConn.peerConnection.getSenders().find(s => s.track?.kind === 'audio');
+            if (sender) await sender.replaceTrack(newTrack);
+          }
+        }
+
+        // Stop old stream
+        if (oldStream) oldStream.getTracks().forEach(t => t.stop());
+
+        // Apply mute
+        newStream.getAudioTracks().forEach(t => t.enabled = !state.isMuted);
+      } catch(err) {
+        showToast('Failed to switch microphone', 'error');
+        console.error(err);
+      }
+    }
+
+    /* ===========================================
+       PEERJS / SIGNALING
+       =========================================== */
+    function createPersonalPeer() {
+      return new Promise((resolve, reject) => {
+        const id = CONFIG.ROOM_PREFIX + generateCode(8);
+        const peer = new Peer(id, CONFIG.PEER_OPTIONS);
+        const timeout = setTimeout(() => { peer.destroy(); reject(new Error('Connection timed out')); }, CONFIG.JOIN_TIMEOUT);
+
+        peer.on('open', (myId) => {
+          clearTimeout(timeout);
+          state.myPeerId = myId;
+          state.personalPeer = peer;
+          resolve(peer);
+        });
+
+        peer.on('error', (err) => {
+          clearTimeout(timeout);
+          if (err.type === 'unavailable-id') {
+            // ID collision — retry
+            peer.destroy();
+            createPersonalPeer().then(resolve).catch(reject);
+          } else {
+            reject(err);
+          }
+        });
+
+        // Handle incoming connections from other peers
+        peer.on('connection', (dataConn) => handleIncomingData(dataConn));
+        peer.on('call', (mediaConn) => handleIncomingCall(mediaConn));
+        peer.on('disconnected', () => {
+          // Try to reconnect to PeerJS server
+          if (state.isInRoom && !peer.destroyed) {
+            setTimeout(() => { try { peer.reconnect(); } catch(_){} }, 2000);
+          }
+        });
+      });
+    }
+
+    function createDoorPeer(code) {
+      return new Promise((resolve, reject) => {
+        const id = doorId(code);
+        const peer = new Peer(id, CONFIG.PEER_OPTIONS);
+        const timeout = setTimeout(() => { peer.destroy(); reject(new Error('Room creation timed out')); }, CONFIG.JOIN_TIMEOUT);
+
+        peer.on('open', () => {
+          clearTimeout(timeout);
+          state.doorPeer = peer;
+          resolve(peer);
+        });
+
+        peer.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+
+        // Door peer accepts join requests
+        peer.on('connection', (dataConn) => handleDoorConnection(dataConn));
+      });
+    }
+
+    function handleDoorConnection(conn) {
+      conn.on('open', () => {
+        conn.on('data', (data) => {
+          if (data.type === 'join-request') {
+            // Send peer list to the joiner
+            const peerList = [];
+            // Add self
+            peerList.push({
+              id: state.myPeerId,
+              username: state.username,
+              joinTime: state.joinTime,
+              isMuted: state.isMuted,
+            });
+            // Add all known peers
+            for (const [pid, p] of state.peers) {
+              peerList.push({
+                id: pid,
+                username: p.username,
+                joinTime: p.joinTime,
+                isMuted: p.isMuted,
+              });
+            }
+            conn.send({
+              type: 'welcome',
+              peers: peerList,
+              hostId: state.hostId,
+              roomCode: state.roomCode,
+              topology: state.topology,
+              starHostId: state.starHostId,
+            });
+          }
+        });
+      });
+    }
+
+    function handleIncomingData(conn) {
+      const peerId = conn.peer;
+
+      conn.on('open', () => {
+        const existing = state.peers.get(peerId);
+        if (existing) {
+          // Update data connection if we already know this peer
+          if (existing.dataConn && existing.dataConn !== conn) {
+            try { existing.dataConn.close(); } catch(_) {}
+          }
+          existing.dataConn = conn;
+        } else {
+          state.peers.set(peerId, {
+            username: null,
+            joinTime: 0,
+            isMuted: false,
+            isSpeaking: false,
+            dataConn: conn,
+            mediaConn: null,
+            audioEl: null,
+            analyser: null,
+            analyserData: null,
+            speakTimeout: null,
+          });
+        }
+      });
+
+      conn.on('data', (data) => handlePeerMessage(peerId, data));
+      conn.on('close', () => handlePeerDisconnect(peerId));
+      conn.on('error', () => handlePeerDisconnect(peerId));
+    }
+
+    function handleIncomingCall(call) {
+      const peerId = call.peer;
+
+      // Star mode: star host answers with personalized mix
+      if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+        if (!state.mixDests.has(peerId)) createMixDestFor(peerId);
+        const mixDest = state.mixDests.get(peerId);
+        call.answer(mixDest ? mixDest.stream : (state.localStream || undefined));
+
+        call.on('stream', (remoteStream) => {
+          const p = state.peers.get(peerId);
+          if (p) { p.mediaConn = call; }
+          addSourceToMixer(peerId, remoteStream);
+        });
+        call.on('close', () => {
+          const p = state.peers.get(peerId);
+          if (p) p.mediaConn = null;
+        });
+        return;
+      }
+
+      // Normal / non-host answer
+      if (state.localStream) {
+        call.answer(state.localStream);
+      } else {
+        call.answer();
+      }
+
+      call.on('stream', (remoteStream) => {
+        const peer = state.peers.get(peerId);
+        if (peer) {
+          peer.mediaConn = call;
+          // In star mode, receiving mix from star host — play without analyser
+          if (state.topology === 'star' && peerId === state.starHostId) {
+            const audio = new Audio();
+            audio.srcObject = remoteStream;
+            audio.volume = state.isDeafened ? 0 : state.masterVolume;
+            audio.play().catch(() => {});
+            peer.audioEl = audio;
+          } else {
+            setupRemoteAudio(peerId, remoteStream);
+          }
+        }
+      });
+
+      call.on('close', () => {
+        const peer = state.peers.get(peerId);
+        if (peer) peer.mediaConn = null;
+      });
+    }
+
+    function connectToPeer(peerId) {
+      if (!state.personalPeer || state.peers.has(peerId)) return;
+
+      // Data connection
+      const dataConn = state.personalPeer.connect(peerId, { reliable: true });
+      state.peers.set(peerId, {
+        username: null,
+        joinTime: 0,
+        isMuted: false,
+        isSpeaking: false,
+        dataConn: dataConn,
+        mediaConn: null,
+        audioEl: null,
+        analyser: null,
+        analyserData: null,
+        speakTimeout: null,
+      });
+
+      dataConn.on('open', () => {
+        // Send hello
+        dataConn.send({
+          type: 'hello',
+          username: state.username,
+          joinTime: state.joinTime,
+          isMuted: state.isMuted,
+        });
+
+        // Audio connection
+        if (state.localStream) {
+          const mediaConn = state.personalPeer.call(peerId, state.localStream);
+          const peer = state.peers.get(peerId);
+          if (peer) peer.mediaConn = mediaConn;
+
+          mediaConn.on('stream', (remoteStream) => {
+            setupRemoteAudio(peerId, remoteStream);
+          });
+        }
+      });
+
+      dataConn.on('data', (data) => handlePeerMessage(peerId, data));
+      dataConn.on('close', () => handlePeerDisconnect(peerId));
+      dataConn.on('error', () => handlePeerDisconnect(peerId));
+    }
+
+    function handlePeerMessage(peerId, data) {
+      let peer = state.peers.get(peerId);
+
+      // In star mode, create entry for unknown peers from relayed messages
+      if (!peer && state.topology === 'star' && data.type === 'hello') {
+        state.peers.set(peerId, {
+          username: null, joinTime: 0, isMuted: false, isSpeaking: false,
+          dataConn: null, mediaConn: null, audioEl: null,
+          analyser: null, analyserData: null, speakTimeout: null, indirect: true,
+        });
+        peer = state.peers.get(peerId);
+      }
+      if (!peer) return;
+
+      switch (data.type) {
+        case 'hello': {
+          const isNew = !peer.username;
+          peer.username = data.username;
+          peer.joinTime = data.joinTime;
+          peer.isMuted = data.isMuted;
+          if (data.quality) peer.qualityPref = data.quality;
+          if (isNew) {
+            playJoinSound();
+            showToast(`${data.username} joined`, 'info');
+            // Check topology after peer count changes
+            checkTopologySwitch();
+          }
+          updateRoomInfo();
+          renderPeers();
+          // Reply with our hello if they don't know us yet
+          if (peer.dataConn && peer.dataConn.open) {
+            peer.dataConn.send({
+              type: 'hello',
+              username: state.username,
+              joinTime: state.joinTime,
+              isMuted: state.isMuted,
+              quality: state.audioQuality,
+            });
+          }
+          // Star host: relay hello to all other peers
+          if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+            starRelay(peerId, data);
+          }
+          break;
+        }
+
+        case 'mute-status':
+          peer.isMuted = data.isMuted;
+          renderPeers();
+          // Star host: relay mute status
+          if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+            starRelay(peerId, data);
+          }
+          break;
+
+        case 'kick':
+          if (data.targetId === state.myPeerId) {
+            showToast('You were kicked from the room', 'error');
+            leaveRoom();
+          }
+          // Star host: relay kick
+          if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+            starRelay(peerId, data);
+          }
+          break;
+
+        case 'host-changed': {
+          state.hostId = data.hostId;
+          const hostPeer2 = state.peers.get(data.hostId);
+          const hostName2 = data.hostId === state.myPeerId ? 'You' : (hostPeer2?.username || 'Someone');
+          showToast(`${hostName2} ${data.hostId === state.myPeerId ? 'are' : 'is'} now the host`, 'info');
+          renderPeers();
+          break;
+        }
+
+        // --- Star topology messages ---
+        case 'ping':
+          if (peer.dataConn?.open) {
+            peer.dataConn.send({ type: 'pong', ts: data.ts });
+          }
+          break;
+
+        case 'pong':
+          handlePong(peerId, data.ts);
+          break;
+
+        case 'begin-star-election': {
+          // Measure our latencies and report back
+          measureLatencies().then(avg => {
+            if (peer.dataConn?.open) {
+              peer.dataConn.send({ type: 'latency-report', avg });
+            }
+          });
+          break;
+        }
+
+        case 'latency-report':
+          // Only the room host collects these
+          if (state.hostId === state.myPeerId && state.latencyScores) {
+            state.latencyScores.set(peerId, data.avg);
+          }
+          break;
+
+        case 'topology-change':
+          if (data.mode === 'star') {
+            applyStarMode(data.starHostId);
+          } else {
+            applyMeshMode();
+          }
+          break;
+
+        case 'speaking-status':
+          // Non-host peers update speaking indicators from star host
+          if (state.topology === 'star' && state.starHostId !== state.myPeerId) {
+            for (const [pid, speaking] of Object.entries(data.speakers)) {
+              if (pid === state.myPeerId) continue;
+              const p2 = state.peers.get(pid);
+              if (p2) {
+                p2.isSpeaking = speaking;
+                updatePeerSpeaking(pid, speaking);
+              }
+            }
+          }
+          break;
+
+        case 'star-relay': {
+          // Message relayed through star host
+          handlePeerMessage(data.from, data.data);
+          break;
+        }
+
+        case 'star-peer-left': {
+          // Star host notifies us that a peer left
+          const leavePeer = state.peers.get(data.peerId);
+          if (leavePeer) {
+            const lname = leavePeer.username || 'Someone';
+            state.peers.delete(data.peerId);
+            playLeaveSound();
+            showToast(`${lname} left`, 'info');
+            updateRoomInfo();
+            renderPeers();
+          }
+          break;
+        }
+
+        case 'quality-pref': {
+          peer.qualityPref = data.quality;
+          // Adjust our sender to this peer using the lower of both preferences
+          const br = effectiveBitrate(data.quality);
+          applyBitrateToConn(peer.mediaConn, br);
+          break;
+        }
+      }
+    }
+
+    function handlePeerDisconnect(peerId) {
+      if (state.switchingTopology) return; // Ignore during topology switch
+
+      const peer = state.peers.get(peerId);
+      if (!peer) return;
+
+      // In star mode, if a non-host peer's indirect connection "disconnects", ignore
+      if (state.topology === 'star' && peer.indirect) return;
+
+      // Star host: remove from mixer
+      if (state.topology === 'star' && state.starHostId === state.myPeerId) {
+        removeFromMixer(peerId);
+        // Notify other peers about the leave
+        for (const [pid, p] of state.peers) {
+          if (pid !== peerId && p.dataConn?.open) {
+            try { p.dataConn.send({ type: 'star-peer-left', peerId }); } catch(_) {}
+          }
+        }
+      }
+
+      // Clean up
+      if (peer.audioEl) { peer.audioEl.pause(); peer.audioEl.srcObject = null; }
+      if (peer.mediaConn) { try { peer.mediaConn.close(); } catch(_) {} }
+      if (peer.dataConn) { try { peer.dataConn.close(); } catch(_) {} }
+      clearTimeout(peer.speakTimeout);
+
+      const name = peer.username || 'Someone';
+      state.peers.delete(peerId);
+
+      if (state.isInRoom) {
+        playLeaveSound();
+        showToast(`${name} left`, 'info');
+        updateRoomInfo();
+        renderPeers();
+
+        // If star host disconnected, switch back to mesh and elect new host
+        if (state.topology === 'star' && peerId === state.starHostId) {
+          state.topology = 'mesh';
+          state.starHostId = null;
+          destroyMixer();
+          updateTopologyBadge();
+          showToast('Star host left — switching to mesh', 'warning');
+        }
+
+        // Host rotation
+        if (peerId === state.hostId) {
+          electHost();
+        }
+
+        // Check if we should switch topology
+        checkTopologySwitch();
+      }
+    }
+
+    function broadcastToAll(message) {
+      for (const [, p] of state.peers) {
+        if (p.dataConn && p.dataConn.open) {
+          try { p.dataConn.send(message); } catch(_) {}
+        }
+      }
+    }
+
+    /* ===========================================
+       STAR TOPOLOGY — LATENCY MEASUREMENT
+       =========================================== */
+    function pingPeer(peerId) {
+      return new Promise(resolve => {
+        const p = state.peers.get(peerId);
+        if (!p?.dataConn?.open) return resolve(9999);
+        const ts = performance.now();
+        state.pendingPings.set(peerId, { ts, resolve });
+        p.dataConn.send({ type: 'ping', ts });
+        setTimeout(() => {
+          if (state.pendingPings.has(peerId)) {
+            state.pendingPings.delete(peerId);
+            resolve(9999);
+          }
+        }, 2000);
+      });
+    }
+
+    function handlePong(peerId, ts) {
+      const pp = state.pendingPings.get(peerId);
+      if (pp && Math.abs(pp.ts - ts) < 0.01) {
+        state.pendingPings.delete(peerId);
+        pp.resolve(performance.now() - pp.ts);
+      }
+    }
+
+    async function measureLatencies() {
+      const peerIds = [...state.peers.keys()].filter(pid => state.peers.get(pid)?.dataConn?.open);
+      let total = 0, count = 0;
+      for (const pid of peerIds) {
+        let sum = 0;
+        for (let i = 0; i < 3; i++) {
+          sum += await pingPeer(pid);
+          if (i < 2) await new Promise(r => setTimeout(r, 30));
+        }
+        total += sum / 3;
+        count++;
+      }
+      return count ? total / count : 0;
+    }
+
+    /* ===========================================
+       STAR TOPOLOGY — AUDIO MIXER
+       =========================================== */
+    function initMixer() {
+      if (state.mixerCtx) return;
+      state.mixerCtx = new (window.AudioContext || window.webkitAudioContext)();
+      state.mixSources = new Map();
+      state.mixDests = new Map();
+
+      // Add our own audio as a source
+      if (state.localStream) {
+        const selfSource = state.mixerCtx.createMediaStreamSource(state.localStream);
+        state.mixSources.set('self', selfSource);
+      }
+    }
+
+    function createMixDestFor(peerId) {
+      if (!state.mixerCtx) return;
+      if (state.mixDests.has(peerId)) return;
+
+      const dest = state.mixerCtx.createMediaStreamDestination();
+      state.mixDests.set(peerId, dest);
+
+      // Connect all existing sources (except this peer's own) to the new dest
+      for (const [srcPid, source] of state.mixSources) {
+        if (srcPid !== peerId) {
+          try { source.connect(dest); } catch(_) {}
+        }
+      }
+    }
+
+    function addSourceToMixer(peerId, stream) {
+      if (!state.mixerCtx || state.starHostId !== state.myPeerId) return;
+
+      // Create source node for this peer's audio
+      const source = state.mixerCtx.createMediaStreamSource(stream);
+      state.mixSources.set(peerId, source);
+
+      // Create analyser for speaking detection
+      const analyser = state.mixerCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const peer = state.peers.get(peerId);
+      if (peer) {
+        peer.starAnalyser = analyser;
+        peer.starAnalyserData = new Uint8Array(analyser.frequencyBinCount);
+      }
+
+      // Connect this source to all OTHER peers' mix destinations
+      for (const [destPid, dest] of state.mixDests) {
+        if (destPid !== peerId) {
+          try { source.connect(dest); } catch(_) {}
+        }
+      }
+
+      // Ensure mix destination exists for this peer
+      if (!state.mixDests.has(peerId)) {
+        createMixDestFor(peerId);
+      }
+    }
+
+    function removeFromMixer(peerId) {
+      const source = state.mixSources.get(peerId);
+      if (source) {
+        try { source.disconnect(); } catch(_) {}
+        state.mixSources.delete(peerId);
+      }
+      state.mixDests.delete(peerId);
+    }
+
+    function destroyMixer() {
+      for (const [, source] of state.mixSources) {
+        try { source.disconnect(); } catch(_) {}
+      }
+      state.mixSources.clear();
+      state.mixDests.clear();
+      if (state.mixerCtx) {
+        try { state.mixerCtx.close(); } catch(_) {}
+        state.mixerCtx = null;
+      }
+    }
+
+    /* ===========================================
+       STAR TOPOLOGY — SWITCHING
+       =========================================== */
+    function updateTopologyBadge() {
+      const badge = $('#topology-badge');
+      if (!badge) return;
+      if (state.topology === 'star') {
+        badge.className = 'topology-badge star';
+        badge.textContent = '⭐ Star';
+        badge.title = 'Star topology — audio routes through a central hub';
+      } else {
+        badge.className = 'topology-badge mesh';
+        badge.textContent = '🔗 Mesh';
+        badge.title = 'Mesh topology — direct connections between all peers';
+      }
+    }
+
+    async function checkTopologySwitch() {
+      const peerCount = state.peers.size + 1;
+      if (state.hostId !== state.myPeerId || state.switchingTopology) return;
+
+      if (state.topology === 'mesh' && peerCount >= CONFIG.STAR_THRESHOLD) {
+        await initiateStarSwitch();
+      } else if (state.topology === 'star' && peerCount < CONFIG.STAR_THRESHOLD - 1) {
+        initiateMeshSwitch();
+      }
+    }
+
+    async function initiateStarSwitch() {
+      showToast('Optimizing for large room...', 'info');
+      state.latencyScores = new Map();
+      broadcastToAll({ type: 'begin-star-election' });
+
+      // Measure our own latencies
+      const myAvg = await measureLatencies();
+      state.latencyScores.set(state.myPeerId, myAvg);
+
+      // Wait for peers to report
+      await new Promise(r => setTimeout(r, 2500));
+
+      // Pick best host (lowest avg latency)
+      let bestId = state.myPeerId;
+      let bestAvg = myAvg;
+      for (const [pid, avg] of state.latencyScores) {
+        if (avg < bestAvg) { bestId = pid; bestAvg = avg; }
+      }
+
+      broadcastToAll({ type: 'topology-change', mode: 'star', starHostId: bestId });
+      await applyStarMode(bestId);
+    }
+
+    function initiateMeshSwitch() {
+      broadcastToAll({ type: 'topology-change', mode: 'mesh' });
+      applyMeshMode();
+    }
+
+    async function applyStarMode(starHostId) {
+      state.switchingTopology = true;
+      state.topology = 'star';
+      state.starHostId = starHostId;
+      updateTopologyBadge();
+
+      if (starHostId === state.myPeerId) {
+        // I'm the star host — initialize mixer
+        initMixer();
+
+        // Close existing media connections (will re-establish with mix)
+        for (const [, p] of state.peers) {
+          if (p.mediaConn) { try { p.mediaConn.close(); } catch(_) {} p.mediaConn = null; }
+          if (p.audioEl) { p.audioEl.pause(); p.audioEl.srcObject = null; p.audioEl = null; }
+          if (p.analyser) { p.analyser = null; p.analyserData = null; }
+        }
+
+        await new Promise(r => setTimeout(r, 800));
+
+        // Call each peer with their personalized mix
+        for (const [pid, p] of state.peers) {
+          if (!p.dataConn?.open) continue;
+          createMixDestFor(pid);
+          const mixDest = state.mixDests.get(pid);
+          if (mixDest) {
+            const mediaConn = state.personalPeer.call(pid, mixDest.stream);
+            p.mediaConn = mediaConn;
+            mediaConn.on('stream', (remoteStream) => {
+              addSourceToMixer(pid, remoteStream);
+            });
+          }
+        }
+
+        showToast('You are the audio hub', 'success');
+      } else {
+        // I'm NOT the star host
+        // Close all connections to non-host peers
+        for (const [pid, p] of state.peers) {
+          if (pid === starHostId) continue;
+          if (p.mediaConn) { try { p.mediaConn.close(); } catch(_) {} p.mediaConn = null; }
+          if (p.dataConn) { try { p.dataConn.close(); } catch(_) {} p.dataConn = null; }
+          if (p.audioEl) { p.audioEl.pause(); p.audioEl.srcObject = null; p.audioEl = null; }
+          if (p.analyser) { p.analyser = null; p.analyserData = null; }
+          p.indirect = true;
+        }
+
+        // Close existing media to star host (will be re-established by star host's call)
+        const hp = state.peers.get(starHostId);
+        if (hp?.mediaConn) { try { hp.mediaConn.close(); } catch(_) {} hp.mediaConn = null; }
+        if (hp?.audioEl) { hp.audioEl.pause(); hp.audioEl.srcObject = null; hp.audioEl = null; }
+        if (hp?.analyser) { hp.analyser = null; hp.analyserData = null; }
+
+        const hostName = state.peers.get(starHostId)?.username || 'hub';
+        showToast(`Star mode via ${hostName}`, 'info');
+      }
+
+      state.switchingTopology = false;
+      renderPeers();
+    }
+
+    function applyMeshMode() {
+      state.switchingTopology = true;
+      state.topology = 'mesh';
+      state.starHostId = null;
+      destroyMixer();
+      updateTopologyBadge();
+
+      // Re-establish mesh connections
+      for (const [pid, p] of state.peers) {
+        p.indirect = false;
+        if (!p.dataConn?.open) {
+          connectToPeerDirect(pid);
+        } else if (!p.mediaConn) {
+          if (state.localStream) {
+            const mediaConn = state.personalPeer.call(pid, state.localStream);
+            p.mediaConn = mediaConn;
+            mediaConn.on('stream', (remoteStream) => { setupRemoteAudio(pid, remoteStream); });
+          }
+        }
+      }
+
+      state.switchingTopology = false;
+      showToast('Switched to mesh mode', 'info');
+      renderPeers();
+    }
+
+    /* Star host: relay data messages between peers */
+    function starRelay(fromPeerId, message) {
+      if (state.starHostId !== state.myPeerId) return;
+      for (const [pid, p] of state.peers) {
+        if (pid !== fromPeerId && p.dataConn?.open) {
+          try { p.dataConn.send({ type: 'star-relay', from: fromPeerId, data: message }); } catch(_) {}
+        }
+      }
+    }
+
+    /* Star host: broadcast speaking status */
+    function broadcastSpeakingStatus() {
+      if (state.topology !== 'star' || state.starHostId !== state.myPeerId) return;
+      const speakers = {};
+      speakers[state.myPeerId] = state.localSpeaking && !state.isMuted;
+      for (const [pid, p] of state.peers) {
+        if (p.starAnalyser) {
+          p.starAnalyser.getByteFrequencyData(p.starAnalyserData);
+          const avg = p.starAnalyserData.reduce((a, b) => a + b, 0) / p.starAnalyserData.length;
+          const nowSpeaking = avg > CONFIG.SPEAKING_THRESHOLD && !p.isMuted;
+          if (nowSpeaking) {
+            clearTimeout(p.speakTimeout);
+            if (!p.isSpeaking) p.isSpeaking = true;
+          } else if (p.isSpeaking && !p.speakTimeout) {
+            p.speakTimeout = setTimeout(() => { p.isSpeaking = false; p.speakTimeout = null; }, CONFIG.SPEAKING_RELEASE_MS);
+          }
+          speakers[pid] = p.isSpeaking || false;
+        }
+      }
+      broadcastToAll({ type: 'speaking-status', speakers });
+    }
+
+    /* ===========================================
+       AUDIO QUALITY
+       =========================================== */
+    async function applyBitrateToConn(mediaConn, bitrate) {
+      const pc = mediaConn?.peerConnection;
+      if (!pc) return;
+      const sender = pc.getSenders().find(s => s.track?.kind === 'audio');
+      if (!sender) return;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        params.encodings[0].maxBitrate = bitrate;
+        await sender.setParameters(params);
+      } catch(_) {}
+    }
+
+    function effectiveBitrate(peerQuality) {
+      const ourBr = CONFIG.QUALITY_PRESETS[state.audioQuality]?.bitrate || 128000;
+      const theirBr = CONFIG.QUALITY_PRESETS[peerQuality]?.bitrate || 128000;
+      return Math.min(ourBr, theirBr);
+    }
+
+    function setAudioQuality(quality) {
+      state.audioQuality = quality;
+      // Apply to all outgoing senders
+      for (const [, p] of state.peers) {
+        const br = effectiveBitrate(p.qualityPref || 'max');
+        applyBitrateToConn(p.mediaConn, br);
+      }
+      // Broadcast preference so peers adjust their senders to us
+      broadcastToAll({ type: 'quality-pref', quality });
+    }
+
+    /* ===========================================
+       ROOM MANAGEMENT
+       =========================================== */
+    async function createRoom() {
+      const username = $('#username-input').value.trim();
+      if (!username) {
+        $('#join-error').textContent = 'Please enter a display name';
+        return;
+      }
+
+      const code = generateCode(6);
+      state.username = username;
+      state.roomCode = code;
+      state.joinTime = Date.now();
+
+      // Disable buttons
+      $('#create-room-btn').disabled = true;
+      $('#join-room-btn').disabled = true;
+      $('#create-room-btn').innerHTML = '<span class="spinner"></span> Creating...';
+      $('#join-error').textContent = '';
+
+      try {
+        await initAudio();
+        await createPersonalPeer();
+        await createDoorPeer(code);
+
+        state.hostId = state.myPeerId;
+        state.isInRoom = true;
+        window.location.hash = code;
+
+        showScreen('room-screen');
+        updateMicButton();
+        updateDeafenButton();
+        updateRoomInfo();
+        renderPeers();
+        startAudioMonitoring();
+        populateAudioDevices();
+
+        showToast(`Room created: ${code.toUpperCase()}`, 'success');
+      } catch (err) {
+        console.error('Create room error:', err);
+        let msg = 'Failed to create room';
+        if (err.type === 'unavailable-id') msg = 'Room code collision — try again';
+        else if (err.message) msg = err.message;
+        $('#join-error').textContent = msg;
+        cleanup();
+      } finally {
+        $('#create-room-btn').disabled = false;
+        $('#join-room-btn').disabled = false;
+        $('#create-room-btn').innerHTML = 'Create Room';
+      }
+    }
+
+    async function joinRoom(code) {
+      const username = $('#username-input').value.trim();
+      if (!username) {
+        $('#join-error').textContent = 'Please enter a display name';
+        return;
+      }
+      if (!code) {
+        $('#join-error').textContent = 'Please enter a room code';
+        return;
+      }
+
+      code = sanitizeCode(code);
+      state.username = username;
+      state.roomCode = code;
+      state.joinTime = Date.now();
+
+      // Disable buttons
+      $('#create-room-btn').disabled = true;
+      $('#join-room-btn').disabled = true;
+      $('#join-room-btn').innerHTML = '<span class="spinner"></span>';
+      $('#join-error').textContent = '';
+
+      try {
+        await initAudio();
+        await createPersonalPeer();
+
+        // Connect to door peer to get room info
+        const peerList = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Room not found or host is unavailable')), CONFIG.JOIN_TIMEOUT);
+
+          const doorConn = state.personalPeer.connect(doorId(code), { reliable: true });
+
+          doorConn.on('open', () => {
+            doorConn.send({ type: 'join-request', username: state.username, peerId: state.myPeerId });
+          });
+
+          doorConn.on('data', (data) => {
+            if (data.type === 'welcome') {
+              clearTimeout(timeout);
+              resolve(data);
+              // Close door connection — no longer needed
+              setTimeout(() => { try { doorConn.close(); } catch(_) {} }, 1000);
+            }
+          });
+
+          doorConn.on('error', (err) => {
+            clearTimeout(timeout);
+            reject(new Error('Room not found'));
+          });
+        });
+
+        state.hostId = peerList.hostId;
+        state.isInRoom = true;
+        window.location.hash = code;
+
+        showScreen('room-screen');
+        updateMicButton();
+        updateDeafenButton();
+        updateRoomInfo();
+
+        // Set topology from welcome
+        if (peerList.topology === 'star') {
+          state.topology = 'star';
+          state.starHostId = peerList.starHostId;
+          updateTopologyBadge();
+        }
+
+        // Pre-populate all peer entries
+        for (const p of peerList.peers) {
+          if (p.id !== state.myPeerId) {
+            const isIndirect = state.topology === 'star' && p.id !== state.starHostId;
+            state.peers.set(p.id, {
+              username: p.username,
+              joinTime: p.joinTime,
+              isMuted: p.isMuted,
+              isSpeaking: false,
+              dataConn: null,
+              mediaConn: null,
+              audioEl: null,
+              analyser: null,
+              analyserData: null,
+              speakTimeout: null,
+              indirect: isIndirect,
+            });
+          }
+        }
+
+        renderPeers();
+
+        // Establish connections
+        if (state.topology === 'star') {
+          // Star mode: only connect to star host
+          if (state.starHostId && state.starHostId !== state.myPeerId) {
+            connectToPeerDirect(state.starHostId);
+          }
+        } else {
+          // Mesh mode: connect to all peers
+          for (const p of peerList.peers) {
+            if (p.id !== state.myPeerId) {
+              connectToPeerDirect(p.id);
+            }
+          }
+        }
+
+        startAudioMonitoring();
+        populateAudioDevices();
+
+        playJoinSound();
+        showToast(`Joined room ${code.toUpperCase()}`, 'success');
+      } catch (err) {
+        console.error('Join room error:', err);
+        $('#join-error').textContent = err.message || 'Failed to join room';
+        cleanup();
+      } finally {
+        $('#create-room-btn').disabled = false;
+        $('#join-room-btn').disabled = false;
+        $('#join-room-btn').innerHTML = 'Join';
+      }
+    }
+
+    function connectToPeerDirect(peerId) {
+      const peer = state.peers.get(peerId);
+      if (!peer || !state.personalPeer) return;
+
+      // Data connection
+      const dataConn = state.personalPeer.connect(peerId, { reliable: true });
+      peer.dataConn = dataConn;
+
+      dataConn.on('open', () => {
+        dataConn.send({
+          type: 'hello',
+          username: state.username,
+          joinTime: state.joinTime,
+          isMuted: state.isMuted,
+          quality: state.audioQuality,
+        });
+
+        // Audio connection
+        if (state.localStream) {
+          const mediaConn = state.personalPeer.call(peerId, state.localStream);
+          peer.mediaConn = mediaConn;
+
+          mediaConn.on('stream', (remoteStream) => {
+            setupRemoteAudio(peerId, remoteStream);
+          });
+          // Apply quality after connection establishes
+          mediaConn.on('stream', () => {
+            const peer2 = state.peers.get(peerId);
+            const br = effectiveBitrate(peer2?.qualityPref || 'max');
+            applyBitrateToConn(mediaConn, br);
+          });
+        }
+      });
+
+      dataConn.on('data', (data) => handlePeerMessage(peerId, data));
+      dataConn.on('close', () => handlePeerDisconnect(peerId));
+      dataConn.on('error', () => handlePeerDisconnect(peerId));
+    }
+
+    function electHost() {
+      // Find peer with earliest join time (including self)
+      let earliest = { id: state.myPeerId, time: state.joinTime };
+
+      for (const [pid, p] of state.peers) {
+        if (p.joinTime && p.joinTime < earliest.time) {
+          earliest = { id: pid, time: p.joinTime };
+        }
+      }
+
+      state.hostId = earliest.id;
+
+      if (earliest.id === state.myPeerId) {
+        showToast('You are now the host', 'success');
+        // Take over the door peer
+        takeDoorPeer();
+      }
+
+      broadcastToAll({ type: 'host-changed', hostId: state.hostId });
+      renderPeers();
+    }
+
+    async function takeDoorPeer() {
+      // Destroy old door peer if exists
+      if (state.doorPeer) {
+        try { state.doorPeer.destroy(); } catch(_) {}
+        state.doorPeer = null;
+      }
+      try {
+        await createDoorPeer(state.roomCode);
+      } catch(err) {
+        console.warn('Failed to take door peer:', err);
+        // Not critical — existing mesh connections still work
+      }
+    }
+
+    function kickPeer(peerId) {
+      if (state.hostId !== state.myPeerId) return;
+      broadcastToAll({ type: 'kick', targetId: peerId });
+      // Disconnect the kicked peer
+      const peer = state.peers.get(peerId);
+      if (peer) {
+        const name = peer.username || 'User';
+        showToast(`Kicked ${name}`, 'warning');
+        if (peer.dataConn) { try { peer.dataConn.close(); } catch(_) {} }
+        if (peer.mediaConn) { try { peer.mediaConn.close(); } catch(_) {} }
+      }
+    }
+
+    function leaveRoom() {
+      cleanup();
+      state.isInRoom = false;
+      window.location.hash = '';
+      showScreen('join-screen');
+    }
+
+    function cleanup() {
+      // Stop audio monitoring
+      if (state.animFrameId) { cancelAnimationFrame(state.animFrameId); state.animFrameId = null; }
+      clearTimeout(state.localSpeakTimeout);
+
+      // Close all peer connections
+      for (const [pid, p] of state.peers) {
+        if (p.audioEl) { p.audioEl.pause(); p.audioEl.srcObject = null; }
+        if (p.mediaConn) { try { p.mediaConn.close(); } catch(_) {} }
+        if (p.dataConn) { try { p.dataConn.close(); } catch(_) {} }
+        clearTimeout(p.speakTimeout);
+      }
+      state.peers.clear();
+
+      // Destroy PeerJS peers
+      if (state.doorPeer) { try { state.doorPeer.destroy(); } catch(_) {} state.doorPeer = null; }
+      if (state.personalPeer) { try { state.personalPeer.destroy(); } catch(_) {} state.personalPeer = null; }
+
+      // Stop local stream
+      if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
+
+      // Close audio context
+      if (state.audioContext) { try { state.audioContext.close(); } catch(_) {} state.audioContext = null; }
+
+      state.localAnalyser = null;
+      state.localAnalyserData = null;
+      state.localSpeaking = false;
+      state.myPeerId = null;
+      state.hostId = null;
+
+      // Star topology cleanup
+      destroyMixer();
+      state.topology = 'mesh';
+      state.starHostId = null;
+      state.switchingTopology = false;
+      state.pendingPings.clear();
+      state.latencyScores.clear();
+      state.speakBroadcastCounter = 0;
+    }
+
+    /* ===========================================
+       EVENT HANDLERS
+       =========================================== */
+    // Create room
+    $('#create-room-btn').addEventListener('click', createRoom);
+
+    // Join room
+    $('#join-room-btn').addEventListener('click', () => {
+      const code = $('#room-code-input').value.trim();
+      joinRoom(code);
+    });
+
+    // Enter key to join
+    $('#room-code-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const code = $('#room-code-input').value.trim();
+        joinRoom(code);
+      }
+    });
+    $('#username-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const code = $('#room-code-input').value.trim();
+        if (code) joinRoom(code);
+        else createRoom();
+      }
+    });
+
+    // Clear error on input
+    $('#username-input').addEventListener('input', () => { $('#join-error').textContent = ''; });
+    $('#room-code-input').addEventListener('input', () => { $('#join-error').textContent = ''; });
+
+    // Control bar
+    $('#mic-btn').addEventListener('click', toggleMute);
+    $('#deafen-btn').addEventListener('click', toggleDeafen);
+    $('#leave-btn').addEventListener('click', leaveRoom);
+
+    // Copy link
+    $('#copy-link-btn').addEventListener('click', () => {
+      const url = window.location.origin + window.location.pathname + '#' + state.roomCode;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Invite link copied!', 'success');
+      }).catch(() => {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        showToast('Invite link copied!', 'success');
+      });
+    });
+
+    // Settings modal
+    $('#settings-btn').addEventListener('click', () => {
+      $('#settings-modal').classList.add('active');
+      populateAudioDevices();
+    });
+    $('#settings-close').addEventListener('click', () => {
+      $('#settings-modal').classList.remove('active');
+    });
+    $('#settings-modal').addEventListener('click', (e) => {
+      if (e.target === $('#settings-modal')) {
+        $('#settings-modal').classList.remove('active');
+      }
+    });
+
+    // Volume slider
+    $('#volume-slider').addEventListener('input', (e) => {
+      const vol = parseInt(e.target.value) / 100;
+      setMasterVolume(vol);
+      $('#volume-value').textContent = e.target.value + '%';
+    });
+
+    // Input device change
+    $('#input-device').addEventListener('change', (e) => {
+      switchMicrophone(e.target.value);
+    });
+
+    // Quality selector
+    $('#quality-select').addEventListener('change', (e) => {
+      setAudioQuality(e.target.value);
+      showToast(`Audio quality: ${CONFIG.QUALITY_PRESETS[e.target.value].label}`, 'info');
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (!state.isInRoom) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'm' || e.key === 'M') { e.preventDefault(); toggleMute(); }
+      if (e.key === 'd' || e.key === 'D') { e.preventDefault(); toggleDeafen(); }
+      if (e.key === 'Escape') {
+        if ($('#settings-modal').classList.contains('active')) {
+          $('#settings-modal').classList.remove('active');
+        }
+      }
+    });
+
+    // Before unload — attempt to notify peers
+    window.addEventListener('beforeunload', () => {
+      if (state.isInRoom) {
+        broadcastToAll({ type: 'bye' });
+      }
+    });
+
+    /* ===========================================
+       INITIALIZATION
+       =========================================== */
+    function init() {
+      // Check URL hash for room code
+      const hash = window.location.hash.slice(1);
+      if (hash) {
+        const code = sanitizeCode(hash);
+        if (code) {
+          $('#room-code-input').value = code;
+          // Focus username if room code is pre-filled
+          setTimeout(() => $('#username-input').focus(), 300);
+        }
+      } else {
+        setTimeout(() => $('#username-input').focus(), 300);
+      }
+
+      // Initialize mic/deafen button icons
+      updateMicButton();
+      updateDeafenButton();
+
+      // Check WebRTC support
+      if (!window.RTCPeerConnection || !navigator.mediaDevices) {
+        $('#join-error').textContent = 'Your browser does not support WebRTC. Please use Chrome, Firefox, or Edge.';
+        $('#create-room-btn').disabled = true;
+        $('#join-room-btn').disabled = true;
+      }
+    }
+
+    init();
+
+    })();
+    </script>
+</body>
+</html>
