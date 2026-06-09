@@ -35,8 +35,8 @@ Both versions share the same voice features, design, and encryption.
 
 ### Hosted (GitHub Pages)
 
-- **Standard version**: [https://YOUR_USERNAME.github.io/LanVoice/](https://YOUR_USERNAME.github.io/LanVoice/)
-- **Zero-dep version**: [https://YOUR_USERNAME.github.io/LanVoice/zero-dep/](https://YOUR_USERNAME.github.io/LanVoice/zero-dep/)
+- **Standard version**: [https://hdzd.github.io/LanVoice/](https://hdzd.github.io/LanVoice/)
+- **Zero-dep version**: [https://hdzd.github.io/LanVoice/zero-dep/](https://hdzd.github.io/LanVoice/zero-dep/)
 
 ### Run locally
 
