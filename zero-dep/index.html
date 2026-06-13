@@ -396,6 +396,7 @@
       mixDst: new Map(),
       speakCtr: 0,
       audioQ: 'max',
+      helloSent: new Set(),
     };
     const STAR_THRESHOLD = 5;
     const SPEAK_BROADCAST_HZ = 6;
@@ -662,8 +663,8 @@
     function setupDc(pid,dc){
       const p=S.peers.get(pid);if(!p)return;p.dc=dc;
       dc.onmessage=e=>{try{handleMsg(pid,JSON.parse(e.data))}catch(_){}};
-      dc.onclose=()=>peerLeft(pid);
-      dc.onerror=()=>peerLeft(pid);
+      dc.onclose=()=>{const pr=S.peers.get(pid);if(!pr||pr.dc===dc)peerLeft(pid)};
+      dc.onerror=()=>{const pr=S.peers.get(pid);if(!pr||pr.dc===dc)peerLeft(pid)};
     }
 
     function handleMsg(from,msg){
@@ -677,7 +678,7 @@
         case 'hello':
           if(p){const isNew=!p.name;p.name=msg.name;p.joinTime=msg.time;p.muted=msg.m||false;if(msg.q)p.qualityPref=msg.q;
             if(isNew){joinSnd();toast(`${msg.name} joined`,'info');checkTopo()}
-            if(p.dc?.readyState==='open')p.dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
+            if(!msg.isReply&&!S.helloSent.has(from)&&p.dc?.readyState==='open'){S.helloSent.add(from);p.dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ,isReply:true}))}
             updateInfo();renderPeers();
             if(S.isHost&&isNew)initMesh(from);
             if(S.topology==='star'&&S.starHostId===S.myId)starRelay(from,msg);
@@ -1050,6 +1051,7 @@
       S.peers.set(pid,{name:null,joinTime:0,muted:false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
       pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(pid,e.streams[0])};
       setupDc(pid,dc);
+      S.helloSent.add(pid);
       dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
       S.pending=null;
       return pid;
@@ -1101,6 +1103,7 @@
                 S.peers.set(pid,{name:msg.name,joinTime:msg.time,muted:msg.m||false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
                 if(S._pendingStream){setupRemoteAudio(pid,S._pendingStream);S._pendingStream=null}
                 setupDc(pid,dc);
+                S.helloSent.add(pid);
                 dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
                 res();
               }
@@ -1137,6 +1140,7 @@
       S.localAn=null;S.localAnD=null;S.localSpeak=false;S.myId=crypto.randomUUID().slice(0,8);
       S.inRoom=false;S.pending=null;S.invitePending=null;
       S.topology='mesh';S.starHostId=null;S.switching=false;S.pendingPings.clear();S.latScores.clear();S.speakCtr=0;
+      S.helloSent.clear();
       showScreen('join-screen');
     }
 
@@ -1173,7 +1177,10 @@
         S.peers.set(pid,{name:null,joinTime:0,muted:false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
         pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(pid,e.streams[0])};
         setupDc(pid,dc);
-        dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
+        if(!S.helloSent.has(pid)){
+          S.helloSent.add(pid);
+          dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
+        }
         S.invitePending=null;
         $('#invite-modal').classList.remove('active');
         toast('Peer connected!','success');

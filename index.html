@@ -1104,6 +1104,7 @@
       mixSources: new Map(),
       mixDests: new Map(),
       speakBroadcastCounter: 0,
+      helloSent: new Set(),
     };
 
     /* ===========================================
@@ -1615,8 +1616,16 @@
       });
 
       conn.on('data', (data) => handlePeerMessage(peerId, data));
-      conn.on('close', () => handlePeerDisconnect(peerId));
-      conn.on('error', () => handlePeerDisconnect(peerId));
+      // Only treat as a real disconnect if this conn is still the active dataConn
+      // (prevents stale/replaced connections from nuking the peer entry)
+      conn.on('close', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === conn) handlePeerDisconnect(peerId);
+      });
+      conn.on('error', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === conn) handlePeerDisconnect(peerId);
+      });
     }
 
     function handleIncomingCall(call) {
@@ -1690,6 +1699,7 @@
 
       dataConn.on('open', () => {
         // Send hello
+        state.helloSent.add(peerId);
         dataConn.send({
           type: 'hello',
           username: state.username,
@@ -1710,8 +1720,14 @@
       });
 
       dataConn.on('data', (data) => handlePeerMessage(peerId, data));
-      dataConn.on('close', () => handlePeerDisconnect(peerId));
-      dataConn.on('error', () => handlePeerDisconnect(peerId));
+      dataConn.on('close', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === dataConn) handlePeerDisconnect(peerId);
+      });
+      dataConn.on('error', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === dataConn) handlePeerDisconnect(peerId);
+      });
     }
 
     function handlePeerMessage(peerId, data) {
@@ -1743,14 +1759,16 @@
           }
           updateRoomInfo();
           renderPeers();
-          // Reply with our hello if they don't know us yet
-          if (peer.dataConn && peer.dataConn.open) {
+          // Reply with our hello only if this is NOT already a reply and we haven't greeted yet
+          if (!data.isReply && !state.helloSent.has(peerId) && peer.dataConn && peer.dataConn.open) {
+            state.helloSent.add(peerId);
             peer.dataConn.send({
               type: 'hello',
               username: state.username,
               joinTime: state.joinTime,
               isMuted: state.isMuted,
               quality: state.audioQuality,
+              isReply: true,
             });
           }
           // Star host: relay hello to all other peers
@@ -2445,6 +2463,7 @@
       peer.dataConn = dataConn;
 
       dataConn.on('open', () => {
+        state.helloSent.add(peerId);
         dataConn.send({
           type: 'hello',
           username: state.username,
@@ -2471,8 +2490,14 @@
       });
 
       dataConn.on('data', (data) => handlePeerMessage(peerId, data));
-      dataConn.on('close', () => handlePeerDisconnect(peerId));
-      dataConn.on('error', () => handlePeerDisconnect(peerId));
+      dataConn.on('close', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === dataConn) handlePeerDisconnect(peerId);
+      });
+      dataConn.on('error', () => {
+        const p = state.peers.get(peerId);
+        if (!p || p.dataConn === dataConn) handlePeerDisconnect(peerId);
+      });
     }
 
     function electHost() {
@@ -2569,6 +2594,7 @@
       state.pendingPings.clear();
       state.latencyScores.clear();
       state.speakBroadcastCounter = 0;
+      state.helloSent.clear();
     }
 
     /* ===========================================
