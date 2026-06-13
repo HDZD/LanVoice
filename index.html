@@ -1110,6 +1110,14 @@
                     <span>AI Noise Suppression</span>
                 </label>
                 <span class="quality-hint">ML-powered noise removal (RNNoise). Reduces keyboard, fan, and background chatter.</span>
+                <div id="vad-threshold-group" style="margin-top:8px;display:none">
+                    <label style="font-size:0.82rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px">VAD Gate Sensitivity</label>
+                    <div class="range-container">
+                        <input type="range" id="vad-threshold-slider" min="0" max="100" value="50">
+                        <span id="vad-threshold-value" class="range-value">50%</span>
+                    </div>
+                    <span class="quality-hint">Controls how aggressively non-speech is silenced. Higher = more keyboard noise removed, but may clip quiet speech.</span>
+                </div>
             </div>
         </div>
     </div>
@@ -2995,6 +3003,9 @@
     // RNNoise toggle
     $('#rnnoise-toggle').addEventListener('change', (e) => {
       state.rnnoiseEnabled = e.target.checked;
+      // Show/hide VAD threshold slider
+      const vadGroup = $('#vad-threshold-group');
+      if (vadGroup) vadGroup.style.display = state.rnnoiseEnabled ? '' : 'none';
       if (!state.rnnoiseReady || !state.rnnoiseNode || !state.audioContext) return;
       const source = state.localSource;
       if (!source || !state.gateGain) return;
@@ -3016,6 +3027,17 @@
         }
       } catch (err) {
         console.warn('RNNoise toggle error:', err);
+      }
+    });
+
+    // VAD threshold slider
+    $('#vad-threshold-slider').addEventListener('input', (e) => {
+      const pct = parseInt(e.target.value, 10);
+      $('#vad-threshold-value').textContent = pct === 0 ? 'Off' : pct + '%';
+      // Map 0-100% → threshold 0.0-0.95 (0 = gate disabled, 100 = very aggressive)
+      const threshold = pct === 0 ? 0 : 0.15 + (pct / 100) * 0.80;
+      if (state.rnnoiseNode) {
+        state.rnnoiseNode.port.postMessage({ type: 'vadThreshold', value: threshold });
       }
     });
 
@@ -3652,8 +3674,13 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     this._outW = 0; // write index
     this._outAvail = 0;
 
+    // VAD-based soft gate: smoothly mutes non-speech frames (catches keyboard clicks)
+    this._gain = 0;       // current smoothed gain [0..1], starts silent
+    this._vadThresh = 0.5; // VAD below this → no speech detected
+
     this.port.onmessage = (e) => {
       if (e.data.type === 'enable') this._enabled = e.data.enabled;
+      if (e.data.type === 'vadThreshold') this._vadThresh = e.data.value;
     };
 
     this._init();
@@ -3664,9 +3691,8 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       this._module = createRNNWasmModuleSync();
       this._heapIn = this._module._malloc(FRAME_SIZE * 4);
       this._heapOut = this._module._malloc(FRAME_SIZE * 4);
-      // Load model weights, then create denoiser state with that model
-      const model = this._module._rnnoise_init();
-      this._state = this._module._rnnoise_create(model);
+      // Use default built-in model (pass 0/null)
+      this._state = this._module._rnnoise_create(0);
       this._ready = true;
 
       // Prime the pipeline: process one silent frame to build a 480-sample
@@ -3737,11 +3763,22 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     }
 
     // Process — returns VAD probability [0,1]
-    mod._rnnoise_process_frame(this._state, this._heapOut, this._heapIn);
+    const vad = mod._rnnoise_process_frame(this._state, this._heapOut, this._heapIn);
 
-    // Push denoised samples to output FIFO (back to float -1..1)
+    // VAD-based soft gate: compute target gain from speech probability.
+    // Keyboard clicks produce VAD ~0.1-0.4; speech produces VAD ~0.8-1.0.
+    //   - Near-instant attack (0.95): speech opens the gate immediately
+    //   - Slow release (0.05): gate closes gradually to avoid cutting word tails
+    const targetGain = vad >= this._vadThresh ? 1.0
+      : vad < 0.2 ? 0.0
+      : (vad - 0.2) / (this._vadThresh - 0.2); // linear ramp in between
+    const alpha = targetGain > this._gain ? 0.95 : 0.05;
+    this._gain += alpha * (targetGain - this._gain);
+
+    // Push denoised + gated samples to output FIFO
+    const g = this._gain;
     for (let i = 0; i < FRAME_SIZE; i++) {
-      this._outBuf[this._outW] = F[outOff + i] / 32768;
+      this._outBuf[this._outW] = (F[outOff + i] / 32768) * g;
       this._outW = (this._outW + 1) % FIFO_CAP;
     }
     this._outAvail += FRAME_SIZE;
