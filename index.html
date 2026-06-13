@@ -1442,7 +1442,7 @@
     async function initAudio() {
       try {
         state.localStream = await navigator.mediaDevices.getUserMedia({ audio: CONFIG.AUDIO_CONSTRAINTS });
-        state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
         // Local analyser for speaking detection
         const source = state.audioContext.createMediaStreamSource(state.localStream);
         state.localSource = source;
@@ -3633,6 +3633,7 @@ run();
 // rnnoise-sync.js is inlined above
 
 const FRAME_SIZE = 480; // RNNoise frame size (480 samples = 10ms at 48kHz)
+const FIFO_CAP = FRAME_SIZE * 2; // Output FIFO capacity (must hold > 608 samples worst-case)
 
 class RNNoiseProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -3641,19 +3642,18 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     this._ready = false;
     this._destroyed = false;
 
-    // Ring buffer for accumulating 128-sample blocks into 480-sample frames
-    this._inputBuffer = new Float32Array(FRAME_SIZE);
-    this._outputBuffer = new Float32Array(FRAME_SIZE);
-    this._bufferOffset = 0;
-    // Output ring: stores denoised samples waiting to be sent out
-    this._outRing = new Float32Array(FRAME_SIZE);
-    this._outRingRead = 0;
-    this._outRingAvail = 0;
+    // Input accumulator
+    this._inBuf = new Float32Array(FRAME_SIZE);
+    this._inCount = 0;
+
+    // Output FIFO (circular buffer)
+    this._outBuf = new Float32Array(FIFO_CAP);
+    this._outR = 0; // read index
+    this._outW = 0; // write index
+    this._outAvail = 0;
 
     this.port.onmessage = (e) => {
-      if (e.data.type === 'enable') {
-        this._enabled = e.data.enabled;
-      }
+      if (e.data.type === 'enable') this._enabled = e.data.enabled;
     };
 
     this._init();
@@ -3661,19 +3661,21 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
 
   _init() {
     try {
-      // createRNNWasmModuleSync is global from importScripts
       this._module = createRNNWasmModuleSync();
-      
-      // Allocate WASM heap memory for input/output frame (480 floats = 1920 bytes)
-      this._heapInputPtr = this._module._malloc(FRAME_SIZE * 4);
-      this._heapOutputPtr = this._module._malloc(FRAME_SIZE * 4);
-      
-      // Create denoiser state
-      this._state = this._module._rnnoise_create();
-      
+      this._heapIn = this._module._malloc(FRAME_SIZE * 4);
+      this._heapOut = this._module._malloc(FRAME_SIZE * 4);
+      // Load model weights, then create denoiser state with that model
+      const model = this._module._rnnoise_init();
+      this._state = this._module._rnnoise_create(model);
       this._ready = true;
+
+      // Prime the pipeline: process one silent frame to build a 480-sample
+      // output cushion. This prevents underflows caused by the 480/128
+      // frame size mismatch (480 = 3×128 + 96). Adds ~10ms latency.
+      this._inBuf.fill(0);
+      this._processFrame();
     } catch (err) {
-      console.error('[RNNoise] Failed to initialize:', err);
+      console.error('[RNNoise] Init failed:', err);
       this._ready = false;
     }
   }
@@ -3681,88 +3683,68 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
   process(inputs, outputs) {
     if (this._destroyed) return false;
 
-    const input = inputs[0];
-    const output = outputs[0];
+    const input = inputs[0]?.[0];
+    const output = outputs[0]?.[0];
+    if (!input || !output) return true;
 
-    // If no input or not ready or disabled, pass through
-    if (!input || !input[0] || !this._ready || !this._enabled) {
-      if (input && input[0] && output && output[0]) {
-        output[0].set(input[0]);
-      }
+    // Bypass when disabled or not ready
+    if (!this._ready || !this._enabled) {
+      output.set(input);
       return true;
     }
 
-    const inputData = input[0];
-    const outputData = output[0];
-    const blockSize = inputData.length; // typically 128
+    const N = input.length;
 
-    // Feed input samples into ring buffer
-    let inputPos = 0;
-    let outputPos = 0;
+    // 1. Feed input samples into accumulator, process when full
+    let pos = 0;
+    while (pos < N) {
+      const space = FRAME_SIZE - this._inCount;
+      const take = Math.min(space, N - pos);
+      this._inBuf.set(input.subarray(pos, pos + take), this._inCount);
+      this._inCount += take;
+      pos += take;
 
-    while (inputPos < blockSize) {
-      // How many samples we can copy into the input buffer
-      const spaceInBuffer = FRAME_SIZE - this._bufferOffset;
-      const samplesToRead = Math.min(spaceInBuffer, blockSize - inputPos);
-      
-      this._inputBuffer.set(
-        inputData.subarray(inputPos, inputPos + samplesToRead),
-        this._bufferOffset
-      );
-      this._bufferOffset += samplesToRead;
-      inputPos += samplesToRead;
-
-      // When we have a full frame, process it
-      if (this._bufferOffset >= FRAME_SIZE) {
+      if (this._inCount >= FRAME_SIZE) {
         this._processFrame();
-        this._bufferOffset = 0;
+        this._inCount = 0;
       }
     }
 
-    // Copy available output samples
-    while (outputPos < blockSize && this._outRingAvail > 0) {
-      outputData[outputPos] = this._outRing[this._outRingRead];
-      this._outRingRead = (this._outRingRead + 1) % FRAME_SIZE;
-      this._outRingAvail--;
-      outputPos++;
-    }
-
-    // If we don't have enough output yet (startup), fill with input (passthrough)
-    while (outputPos < blockSize) {
-      outputData[outputPos] = inputData[outputPos];
-      outputPos++;
+    // 2. Read denoised output from FIFO
+    if (this._outAvail >= N) {
+      for (let i = 0; i < N; i++) {
+        output[i] = this._outBuf[this._outR];
+        this._outR = (this._outR + 1) % FIFO_CAP;
+      }
+      this._outAvail -= N;
+    } else {
+      // Should never happen after priming, but output silence (not raw input!)
+      output.fill(0);
     }
 
     return true;
   }
 
   _processFrame() {
-    const module = this._module;
-    const HEAPF32 = module.HEAPF32;
-    
-    // Copy input to WASM heap (RNNoise expects values in [-32768, 32767] range)
-    const inputOffset = this._heapInputPtr >> 2;
+    const mod = this._module;
+    const F = mod.HEAPF32;
+    const inOff = this._heapIn >> 2;
+    const outOff = this._heapOut >> 2;
+
+    // Copy to WASM heap (RNNoise expects int16 range: -32768..32767)
     for (let i = 0; i < FRAME_SIZE; i++) {
-      HEAPF32[inputOffset + i] = this._inputBuffer[i] * 32768;
+      F[inOff + i] = this._inBuf[i] * 32768;
     }
-    
-    // Process frame — returns VAD probability [0, 1]
-    const vad = module._rnnoise_process_frame(
-      this._state,
-      this._heapOutputPtr,
-      this._heapInputPtr
-    );
-    
-    // Copy denoised output from WASM heap back to float [-1, 1]
-    const outputOffset = this._heapOutputPtr >> 2;
+
+    // Process — returns VAD probability [0,1]
+    mod._rnnoise_process_frame(this._state, this._heapOut, this._heapIn);
+
+    // Push denoised samples to output FIFO (back to float -1..1)
     for (let i = 0; i < FRAME_SIZE; i++) {
-      this._outRing[(this._outRingRead + this._outRingAvail + i) % FRAME_SIZE] = 
-        HEAPF32[outputOffset + i] / 32768;
+      this._outBuf[this._outW] = F[outOff + i] / 32768;
+      this._outW = (this._outW + 1) % FIFO_CAP;
     }
-    this._outRingAvail += FRAME_SIZE;
-    
-    // Report VAD probability periodically (every frame = 10ms)
-    this.port.postMessage({ type: 'vad', vad: vad });
+    this._outAvail += FRAME_SIZE;
   }
 }
 
