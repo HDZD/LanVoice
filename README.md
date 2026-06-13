@@ -1,4 +1,4 @@
-# 🎙️ LanVoice
+# 🎙️ WebVoice
 
 **Peer-to-peer voice chat in your browser.** No accounts, no downloads, no servers to run.
 
@@ -8,7 +8,7 @@ All voice data flows directly between browsers via WebRTC — nothing goes throu
 
 | | [`index.html`](index.html) | [`zero-dep/index.html`](zero-dep/index.html) |
 |---|---|---|
-| **Name** | LanVoice | LanVoice Zero |
+| **Name** | WebVoice | WebVoice Zero |
 | **Dependencies** | [PeerJS](https://peerjs.com/) CDN (~50KB) | **None** — pure browser APIs |
 | **Join flow** | 6-char room code, one step | ~220-char invite code, two-step exchange |
 | **Signaling** | PeerJS free cloud relay | Manual code copy-paste |
@@ -35,8 +35,8 @@ Both versions share the same voice features, design, and encryption.
 
 ### Hosted (GitHub Pages)
 
-- **Standard version**: [https://hdzd.github.io/LanVoice/](https://hdzd.github.io/LanVoice/)
-- **Zero-dep version**: [https://hdzd.github.io/LanVoice/zero-dep/](https://hdzd.github.io/LanVoice/zero-dep/)
+- **Standard version**: [https://hdzd.github.io/WebVoice/](https://hdzd.github.io/WebVoice/)
+- **Zero-dep version**: [https://hdzd.github.io/WebVoice/zero-dep/](https://hdzd.github.io/WebVoice/zero-dep/)
 
 ### Run locally
 
@@ -133,7 +133,7 @@ WebRTC mandates encryption — it cannot be disabled:
 
 ## 💖 Support
 
-If you find LanVoice useful, consider [buying me a coffee](https://hdzd.github.io/donate/)!
+If you find WebVoice useful, consider [buying me a coffee](https://hdzd.github.io/donate/)!
 
 ## 📄 License
 
