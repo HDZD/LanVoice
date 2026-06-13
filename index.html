@@ -577,6 +577,47 @@
       font-weight: 500;
     }
 
+    /* Gate meter */
+    .gate-meter {
+      position: relative;
+      height: 10px;
+      background: var(--bg-deep);
+      border-radius: 5px;
+      overflow: visible;
+      margin-bottom: 10px;
+      border: 1px solid var(--border-subtle);
+    }
+    .gate-meter-fill {
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      border-radius: 5px;
+      transition: width 60ms ease-out;
+      background: linear-gradient(90deg, #22c55e, #00d4aa);
+    }
+    .gate-meter-fill.gated {
+      background: linear-gradient(90deg, rgba(239,68,68,.5), rgba(239,68,68,.3));
+    }
+    .gate-meter-thresh {
+      position: absolute;
+      top: -3px;
+      width: 2px;
+      height: calc(100% + 6px);
+      background: var(--warning);
+      border-radius: 1px;
+      z-index: 2;
+      transition: left 80ms ease;
+      box-shadow: 0 0 6px rgba(245, 158, 11, .4);
+    }
+    .gate-meter-thresh::after {
+      content: '';
+      position: absolute;
+      top: -4px; left: -3px;
+      width: 8px; height: 8px;
+      background: var(--warning);
+      border-radius: 50%;
+    }
+
     /* =============================================
        CONTROL BAR
        ============================================= */
@@ -1047,6 +1088,18 @@
                 </select>
                 <span class="quality-hint">Lower quality = less bandwidth. Both send &amp; receive are adjusted.</span>
             </div>
+            <div class="setting-group">
+                <label>Noise Gate</label>
+                <div class="gate-meter">
+                    <div class="gate-meter-fill" id="gate-meter-fill"></div>
+                    <div class="gate-meter-thresh" id="gate-meter-thresh" style="display:none"></div>
+                </div>
+                <div class="range-container">
+                    <input type="range" id="gate-slider" min="0" max="100" value="0">
+                    <span id="gate-value" class="range-value">Off</span>
+                </div>
+                <span class="quality-hint">Silences your mic when volume drops below threshold. Set just above background noise.</span>
+            </div>
         </div>
     </div>
 
@@ -1145,6 +1198,9 @@
       mixDests: new Map(),
       speakBroadcastCounter: 0,
       helloSent: new Set(),
+      gateThreshold: 0,
+      gateOpen: true,
+      gateReleaseTimer: null,
     };
 
     /* ===========================================
@@ -1379,12 +1435,22 @@
         state.localAnalyser.fftSize = 256;
         state.localAnalyserData = new Uint8Array(state.localAnalyser.frequencyBinCount);
         source.connect(state.localAnalyser);
+        // Gate chain: source → gainNode → destination (peers get the gated stream)
+        state.gateGain = state.audioContext.createGain();
+        state.gateDst = state.audioContext.createMediaStreamDestination();
+        source.connect(state.gateGain);
+        state.gateGain.connect(state.gateDst);
+        state.gatedStream = state.gateDst.stream;
         return true;
       } catch (err) {
         console.warn('Mic access denied:', err);
         showToast('Microphone access denied — joining in listen-only mode', 'warning');
         return false;
       }
+    }
+
+    function getOutboundStream() {
+      return state.gatedStream || state.localStream;
     }
 
     function setupRemoteAudio(peerId, stream) {
@@ -1413,14 +1479,45 @@
     }
 
     function startAudioMonitoring() {
+      const GATE_RELEASE = 200;
       function loop() {
-        // Local speaking
-        if (state.localAnalyser && !state.isMuted) {
+        // Local level
+        let localAvg = 0;
+        if (state.localAnalyser) {
           state.localAnalyser.getByteFrequencyData(state.localAnalyserData);
-          const avg = state.localAnalyserData.reduce((a, b) => a + b, 0) / state.localAnalyserData.length;
-          setSpeaking('self', avg > CONFIG.SPEAKING_THRESHOLD);
+          localAvg = state.localAnalyserData.reduce((a, b) => a + b, 0) / state.localAnalyserData.length;
+        }
+
+        // Noise gate (uses GainNode — analyser always reads raw mic)
+        if (state.gateThreshold > 0 && !state.isMuted && state.gateGain) {
+          if (localAvg >= state.gateThreshold) {
+            clearTimeout(state.gateReleaseTimer); state.gateReleaseTimer = null;
+            if (!state.gateOpen) {
+              state.gateOpen = true;
+              state.gateGain.gain.setTargetAtTime(1, state.audioContext.currentTime, 0.015);
+            }
+          } else if (state.gateOpen && !state.gateReleaseTimer) {
+            state.gateReleaseTimer = setTimeout(() => {
+              state.gateOpen = false; state.gateReleaseTimer = null;
+              if (!state.isMuted && state.gateGain)
+                state.gateGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.015);
+            }, GATE_RELEASE);
+          }
+        }
+
+        // Speaking detection (only when not muted and gate is open or disabled)
+        if (!state.isMuted && (state.gateThreshold === 0 || state.gateOpen)) {
+          setSpeaking('self', localAvg > CONFIG.SPEAKING_THRESHOLD);
         } else {
           setSpeaking('self', false);
+        }
+
+        // Update gate meter if settings visible (sqrt scaling for perceptual loudness)
+        const mf = $('#gate-meter-fill');
+        if (mf) {
+          const pct = localAvg > 0 ? Math.sqrt(Math.min(1, localAvg / 50)) * 100 : 0;
+          mf.style.width = pct + '%';
+          mf.classList.toggle('gated', state.gateThreshold > 0 && localAvg < state.gateThreshold);
         }
 
         // Remote peers speaking (mesh mode only — star uses broadcast)
@@ -1529,22 +1626,15 @@
         const oldStream = state.localStream;
         state.localStream = newStream;
 
-        // Update local analyser
-        if (state.audioContext && state.localAnalyser) {
+        // Update audio graph: analyser + gate chain
+        if (state.audioContext) {
           const source = state.audioContext.createMediaStreamSource(newStream);
           state.localAnalyser = state.audioContext.createAnalyser();
           state.localAnalyser.fftSize = 256;
           state.localAnalyserData = new Uint8Array(state.localAnalyser.frequencyBinCount);
           source.connect(state.localAnalyser);
-        }
-
-        // Replace track in all peer connections
-        const newTrack = newStream.getAudioTracks()[0];
-        for (const [, p] of state.peers) {
-          if (p.mediaConn && p.mediaConn.peerConnection) {
-            const sender = p.mediaConn.peerConnection.getSenders().find(s => s.track?.kind === 'audio');
-            if (sender) await sender.replaceTrack(newTrack);
-          }
+          // Reconnect gate chain
+          if (state.gateGain) source.connect(state.gateGain);
         }
 
         // Stop old stream
@@ -1753,7 +1843,7 @@
       if (state.topology === 'star' && state.starHostId === state.myPeerId) {
         if (!state.mixDests.has(peerId)) createMixDestFor(peerId);
         const mixDest = state.mixDests.get(peerId);
-        call.answer(mixDest ? mixDest.stream : (state.localStream || undefined));
+        call.answer(mixDest ? mixDest.stream : (getOutboundStream() || undefined));
 
         call.on('stream', (remoteStream) => {
           const p = state.peers.get(peerId);
@@ -1768,8 +1858,8 @@
       }
 
       // Normal / non-host answer
-      if (state.localStream) {
-        call.answer(state.localStream);
+      if (getOutboundStream()) {
+        call.answer(getOutboundStream());
       } else {
         call.answer();
       }
@@ -1830,8 +1920,8 @@
         });
 
         // Audio connection
-        if (state.localStream) {
-          const mediaConn = state.personalPeer.call(peerId, state.localStream);
+        if (getOutboundStream()) {
+          const mediaConn = state.personalPeer.call(peerId, getOutboundStream());
           const peer = state.peers.get(peerId);
           if (peer) peer.mediaConn = mediaConn;
 
@@ -2140,8 +2230,8 @@
       state.mixDests = new Map();
 
       // Add our own audio as a source
-      if (state.localStream) {
-        const selfSource = state.mixerCtx.createMediaStreamSource(state.localStream);
+      if (getOutboundStream()) {
+        const selfSource = state.mixerCtx.createMediaStreamSource(getOutboundStream());
         state.mixSources.set('self', selfSource);
       }
     }
@@ -2342,8 +2432,8 @@
         if (!p.dataConn?.open) {
           connectToPeerDirect(pid);
         } else if (!p.mediaConn) {
-          if (state.localStream) {
-            const mediaConn = state.personalPeer.call(pid, state.localStream);
+          if (getOutboundStream()) {
+            const mediaConn = state.personalPeer.call(pid, getOutboundStream());
             p.mediaConn = mediaConn;
             mediaConn.on('stream', (remoteStream) => { setupRemoteAudio(pid, remoteStream); });
           }
@@ -2616,8 +2706,8 @@
         });
 
         // Audio connection
-        if (state.localStream) {
-          const mediaConn = state.personalPeer.call(peerId, state.localStream);
+        if (getOutboundStream()) {
+          const mediaConn = state.personalPeer.call(peerId, getOutboundStream());
           peer.mediaConn = mediaConn;
 
           mediaConn.on('stream', (remoteStream) => {
@@ -2730,6 +2820,9 @@
       state.localSpeaking = false;
       state.myPeerId = null;
       state.hostId = null;
+      state.gateGain = null;
+      state.gateDst = null;
+      state.gatedStream = null;
 
       // Star topology cleanup
       destroyMixer();
@@ -2740,6 +2833,10 @@
       state.latencyScores.clear();
       state.speakBroadcastCounter = 0;
       state.helloSent.clear();
+
+      // Gate cleanup
+      clearTimeout(state.gateReleaseTimer); state.gateReleaseTimer = null;
+      state.gateOpen = true;
     }
 
     /* ===========================================
@@ -2827,6 +2924,25 @@
     $('#quality-select').addEventListener('change', (e) => {
       setAudioQuality(e.target.value);
       showToast(`Audio quality: ${CONFIG.QUALITY_PRESETS[e.target.value].label}`, 'info');
+    });
+
+    // Noise gate slider
+    $('#gate-slider').addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      state.gateThreshold = Math.pow(v / 100, 2) * 50;
+      $('#gate-value').textContent = v === 0 ? 'Off' : v + '%';
+      const th = $('#gate-meter-thresh');
+      if (v === 0) {
+        th.style.display = 'none';
+        // Re-open gate
+        state.gateOpen = true;
+        clearTimeout(state.gateReleaseTimer); state.gateReleaseTimer = null;
+        if (state.gateGain && state.audioContext)
+          state.gateGain.gain.setTargetAtTime(1, state.audioContext.currentTime, 0.015);
+      } else {
+        th.style.display = '';
+        th.style.left = v + '%';
+      }
     });
 
     // Keyboard shortcuts

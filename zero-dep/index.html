@@ -224,6 +224,12 @@
     .topology-badge.mesh{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,212,170,.15)}
     .topology-badge.star{background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.15)}
     .quality-hint{display:block;font-size:11px;color:var(--text-muted);margin-top:4px}
+
+    .gate-meter{position:relative;height:10px;background:var(--bg-deep);border-radius:5px;overflow:visible;margin-bottom:10px;border:1px solid var(--border-subtle)}
+    .gate-meter-fill{position:absolute;top:0;left:0;height:100%;border-radius:5px;transition:width 60ms ease-out;background:linear-gradient(90deg,#22c55e,#00d4aa)}
+    .gate-meter-fill.gated{background:linear-gradient(90deg,rgba(239,68,68,.5),rgba(239,68,68,.3))}
+    .gate-meter-thresh{position:absolute;top:-3px;width:2px;height:calc(100% + 6px);background:var(--warning);border-radius:1px;z-index:2;transition:left 80ms ease;box-shadow:0 0 6px rgba(245,158,11,.4)}
+    .gate-meter-thresh::after{content:'';position:absolute;top:-4px;left:-3px;width:8px;height:8px;background:var(--warning);border-radius:50%}
     </style>
 </head>
 <body>
@@ -334,6 +340,7 @@
         <div class="setting-group"><label for="input-device">Microphone</label><select id="input-device" class="select"></select></div>
         <div class="setting-group"><label>Master Volume</label><div class="range-container"><input type="range" id="volume-slider" min="0" max="100" value="100"><span id="volume-value" class="range-value">100%</span></div></div>
         <div class="setting-group"><label for="quality-select">Audio Quality</label><select id="quality-select" class="select"><option value="max" selected>Max (128 kbps)</option><option value="high">High (64 kbps)</option><option value="medium">Medium (32 kbps)</option><option value="low">Low (16 kbps)</option><option value="ultralow">Ultra Low (8 kbps)</option></select><span class="quality-hint">Lower quality = less bandwidth. Both send &amp; receive are adjusted.</span></div>
+        <div class="setting-group"><label>Noise Gate</label><div class="gate-meter"><div class="gate-meter-fill" id="gate-meter-fill"></div><div class="gate-meter-thresh" id="gate-meter-thresh" style="display:none"></div></div><div class="range-container"><input type="range" id="gate-slider" min="0" max="100" value="0"><span id="gate-value" class="range-value">Off</span></div><span class="quality-hint">Silences your mic when volume drops below threshold. Set just above background noise.</span></div>
       </div>
     </div>
 
@@ -372,6 +379,7 @@
     const HEARTBEAT_INTERVAL = 5000;
     const HEARTBEAT_TIMEOUT = 15000;
     const DISCONNECT_GRACE = 8000;
+    const GATE_RELEASE = 200;
 
     /* =========================================
        STATE
@@ -407,6 +415,9 @@
       speakCtr: 0,
       audioQ: 'max',
       helloSent: new Set(),
+      gateThresh: 0,
+      gateOpen: true,
+      gateReleaseT: null,
     };
     const STAR_THRESHOLD = 5;
     const SPEAK_BROADCAST_HZ = 6;
@@ -626,6 +637,12 @@
         S.localAn=S.actx.createAnalyser();S.localAn.fftSize=256;
         S.localAnD=new Uint8Array(S.localAn.frequencyBinCount);
         src.connect(S.localAn);
+        // Gate chain: src → gainNode → destination (peers get the gated stream)
+        S.gateGain=S.actx.createGain();
+        S.gateDst=S.actx.createMediaStreamDestination();
+        src.connect(S.gateGain);
+        S.gateGain.connect(S.gateDst);
+        S.gatedStream=S.gateDst.stream;
         return true;
       }catch(e){toast('Mic denied — listen-only mode','warning');return false}
     }
@@ -638,7 +655,24 @@
 
     function startMonitor(){
       function loop(){
-        if(S.localAn&&!S.muted){S.localAn.getByteFrequencyData(S.localAnD);const avg=S.localAnD.reduce((a,b)=>a+b,0)/S.localAnD.length;setSpeak('self',avg>SPEAK_THRESH)}else setSpeak('self',false);
+        let localAvg=0;
+        if(S.localAn){
+          S.localAn.getByteFrequencyData(S.localAnD);
+          localAvg=S.localAnD.reduce((a,b)=>a+b,0)/S.localAnD.length;
+        }
+        // Noise gate (uses GainNode — analyser always reads raw mic)
+        if(S.gateThresh>0&&!S.muted&&S.gateGain){
+          if(localAvg>=S.gateThresh){
+            clearTimeout(S.gateReleaseT);S.gateReleaseT=null;
+            if(!S.gateOpen){S.gateOpen=true;S.gateGain.gain.setTargetAtTime(1,S.actx.currentTime,0.015)}
+          }else if(S.gateOpen&&!S.gateReleaseT){
+            S.gateReleaseT=setTimeout(()=>{S.gateOpen=false;S.gateReleaseT=null;if(!S.muted&&S.gateGain)S.gateGain.gain.setTargetAtTime(0,S.actx.currentTime,0.015)},GATE_RELEASE);
+          }
+        }
+        // Speaking detection (only when not muted and gate is open or disabled)
+        if(!S.muted&&(S.gateThresh===0||S.gateOpen)){setSpeak('self',localAvg>SPEAK_THRESH)}else{setSpeak('self',false)}
+        // Update gate meter if settings visible (sqrt scaling for perceptual loudness)
+        const mf=$('#gate-meter-fill');if(mf){const pct=localAvg>0?Math.sqrt(Math.min(1,localAvg/50))*100:0;mf.style.width=pct+'%';mf.classList.toggle('gated',S.gateThresh>0&&localAvg<S.gateThresh)}
         if(S.topology==='mesh'){
           for(const[pid,p]of S.peers){if(p.an){p.an.getByteFrequencyData(p.anD);const avg=p.anD.reduce((a,b)=>a+b,0)/p.anD.length;setSpeak(pid,avg>SPEAK_THRESH)}}
         }
@@ -666,7 +700,7 @@
        PEER CONNECTION HELPER
        ========================================= */
     function makePc(){return new RTCPeerConnection(RTC_CFG)}
-    function addTracks(pc){if(S.stream)S.stream.getTracks().forEach(t=>pc.addTrack(t,S.stream))}
+    function addTracks(pc){const s=S.gatedStream||S.stream;if(s)s.getTracks().forEach(t=>pc.addTrack(t,s))}
 
     /* =========================================
        CONNECTION MONITORING — Auto-disconnect
@@ -1221,10 +1255,12 @@
       if(S.stream){S.stream.getTracks().forEach(t=>t.stop());S.stream=null}
       if(S.actx){try{S.actx.close()}catch(_){};S.actx=null}
       starDestroyMix();
+      S.gateGain=null;S.gateDst=null;S.gatedStream=null;
       S.localAn=null;S.localAnD=null;S.localSpeak=false;S.myId=crypto.randomUUID().slice(0,8);
       S.inRoom=false;S.pending=null;S.invitePending=null;
       S.topology='mesh';S.starHostId=null;S.switching=false;S.pendingPings.clear();S.latScores.clear();S.speakCtr=0;
       S.helloSent.clear();
+      clearTimeout(S.gateReleaseT);S.gateReleaseT=null;S.gateOpen=true;
       showScreen('join-screen');
     }
 
@@ -1320,13 +1356,33 @@
     $('#input-device').addEventListener('change',async e=>{
       try{const ns=await navigator.mediaDevices.getUserMedia({audio:{deviceId:{exact:e.target.value},echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       const old=S.stream;S.stream=ns;
-      if(S.actx){const src=S.actx.createMediaStreamSource(ns);S.localAn=S.actx.createAnalyser();S.localAn.fftSize=256;S.localAnD=new Uint8Array(S.localAn.frequencyBinCount);src.connect(S.localAn)}
-      const nt=ns.getAudioTracks()[0];
-      for(const[,p]of S.peers)if(p.pc){const s=p.pc.getSenders().find(s=>s.track?.kind==='audio');if(s)await s.replaceTrack(nt)}
+      if(S.actx){
+        const src=S.actx.createMediaStreamSource(ns);
+        S.localAn=S.actx.createAnalyser();S.localAn.fftSize=256;
+        S.localAnD=new Uint8Array(S.localAn.frequencyBinCount);
+        src.connect(S.localAn);
+        // Reconnect gate chain
+        if(S.gateGain)src.connect(S.gateGain);
+      }
       if(old)old.getTracks().forEach(t=>t.stop());ns.getAudioTracks().forEach(t=>t.enabled=!S.muted);
       }catch(e){toast('Failed to switch mic','error')}
     });
     $('#quality-select').addEventListener('change',e=>{setAudioQ(e.target.value);toast(`Audio quality: ${Q_PRESETS[e.target.value].label}`,'info')});
+    $('#gate-slider').addEventListener('input',e=>{
+      const v=+e.target.value;
+      S.gateThresh=Math.pow(v/100,2)*50;
+      $('#gate-value').textContent=v===0?'Off':v+'%';
+      const th=$('#gate-meter-thresh');
+      if(v===0){
+        th.style.display='none';
+        // Re-open gate
+        S.gateOpen=true;clearTimeout(S.gateReleaseT);S.gateReleaseT=null;
+        if(S.gateGain)S.gateGain.gain.setTargetAtTime(1,S.actx.currentTime,0.015);
+      }else{
+        th.style.display='';
+        th.style.left=v+'%';
+      }
+    });
 
     // Keyboard shortcuts
     document.addEventListener('keydown',e=>{
