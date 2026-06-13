@@ -362,6 +362,9 @@
     const SPEAK_THRESH = 12;
     const SPEAK_RELEASE = 350;
     const ICE_TIMEOUT = 6000;
+    const HEARTBEAT_INTERVAL = 5000;
+    const HEARTBEAT_TIMEOUT = 15000;
+    const DISCONNECT_GRACE = 8000;
 
     /* =========================================
        STATE
@@ -644,6 +647,53 @@
     function addTracks(pc){if(S.stream)S.stream.getTracks().forEach(t=>pc.addTrack(t,S.stream))}
 
     /* =========================================
+       CONNECTION MONITORING — Auto-disconnect
+       ========================================= */
+    function monitorPc(pid,pc){
+      pc.addEventListener('connectionstatechange',()=>{
+        const state=pc.connectionState;
+        const p=S.peers.get(pid);
+        if(!p||p.pc!==pc)return;
+        if(state==='disconnected'){
+          // Grace period — WebRTC may recover
+          if(!p._disconnGrace){
+            p._disconnGrace=setTimeout(()=>{
+              p._disconnGrace=null;
+              if(p.pc===pc&&(pc.connectionState==='disconnected'||pc.connectionState==='failed'))peerLeft(pid);
+            },DISCONNECT_GRACE);
+          }
+        }else if(state==='failed'){
+          clearTimeout(p._disconnGrace);p._disconnGrace=null;
+          peerLeft(pid);
+        }else if(state==='connected'){
+          clearTimeout(p._disconnGrace);p._disconnGrace=null;
+        }
+      });
+    }
+
+    function startHeartbeat(pid){
+      const p=S.peers.get(pid);if(!p)return;
+      clearInterval(p._hbInterval);clearTimeout(p._hbTimeout);
+      p._lastHbResponse=Date.now();
+      p._hbInterval=setInterval(()=>{
+        const pr=S.peers.get(pid);
+        if(!pr||pr.dc?.readyState!=='open'){clearInterval(pr?._hbInterval);return}
+        try{pr.dc.send(JSON.stringify({t:'hb'}))}catch(_){}
+        // Check if we've timed out
+        if(Date.now()-pr._lastHbResponse>HEARTBEAT_TIMEOUT){
+          clearInterval(pr._hbInterval);pr._hbInterval=null;
+          peerLeft(pid);
+        }
+      },HEARTBEAT_INTERVAL);
+    }
+
+    function stopHeartbeat(pid){
+      const p=S.peers.get(pid);if(!p)return;
+      clearInterval(p._hbInterval);p._hbInterval=null;
+      clearTimeout(p._hbTimeout);p._hbTimeout=null;
+    }
+
+    /* =========================================
        AUDIO QUALITY
        ========================================= */
     async function applyBrToPc(pc,bitrate){
@@ -665,6 +715,9 @@
       dc.onmessage=e=>{try{handleMsg(pid,JSON.parse(e.data))}catch(_){}};
       dc.onclose=()=>{const pr=S.peers.get(pid);if(!pr||pr.dc===dc)peerLeft(pid)};
       dc.onerror=()=>{const pr=S.peers.get(pid);if(!pr||pr.dc===dc)peerLeft(pid)};
+      // Start heartbeat once the channel is usable
+      if(dc.readyState==='open')startHeartbeat(pid);
+      else dc.addEventListener('open',()=>startHeartbeat(pid),{once:true});
     }
 
     function handleMsg(from,msg){
@@ -687,6 +740,9 @@
         case 'mute': if(p){p.muted=msg.m;renderPeers();if(S.topology==='star'&&S.starHostId===S.myId)starRelay(from,msg)} break;
         case 'host': S.hostId=msg.id;S.isHost=msg.id===S.myId;const hn=msg.id===S.myId?'You':(S.peers.get(msg.id)?.name||'Someone');toast(`${hn} ${msg.id===S.myId?'are':'is'} now the host`,'info');renderPeers();break;
         case 'kick': if(msg.target===S.myId){toast('You were kicked','error');leaveRoom()};if(S.topology==='star'&&S.starHostId===S.myId)starRelay(from,msg);break;
+        case 'bye': peerLeft(from);break;
+        case 'hb': if(p)p._lastHbResponse=Date.now();if(p?.dc?.readyState==='open')try{p.dc.send(JSON.stringify({t:'hb-ack'}))}catch(_){};break;
+        case 'hb-ack': if(p)p._lastHbResponse=Date.now();break;
         case 'peers':
           if(msg.list)for(const pr of msg.list){
             if(pr.id!==S.myId&&!S.peers.has(pr.id)){
@@ -765,6 +821,7 @@
       // Store pending mesh connection
       if(!S.peers.has(targetId))S.peers.set(targetId,{name:targetName,joinTime:0,muted:false,speaking:false,dc:null,pc:null,audioEl:null,an:null,anD:null,speakT:null});
       const p=S.peers.get(targetId);p.pc=pc;
+      monitorPc(targetId,pc);
 
       pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(targetId,e.streams[0])};
       pc.onicecandidate=e=>{if(e.candidate){
@@ -785,6 +842,7 @@
       const pc=makePc();addTracks(pc);
       if(!S.peers.has(fromId))S.peers.set(fromId,{name:fromName,joinTime:0,muted:false,speaking:false,dc:null,pc:null,audioEl:null,an:null,anD:null,speakT:null});
       const p=S.peers.get(fromId);p.pc=pc;
+      monitorPc(fromId,pc);
 
       pc.ondatachannel=e=>setupDc(fromId,e.channel);
       pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(fromId,e.streams[0])};
@@ -985,6 +1043,8 @@
         starRemoveFromMix(pid);
         for(const[id,pr]of S.peers)if(id!==pid&&pr.dc?.readyState==='open')try{pr.dc.send(JSON.stringify({t:'star-left',pid}))}catch(_){}
       }
+      stopHeartbeat(pid);
+      clearTimeout(p._disconnGrace);p._disconnGrace=null;
       if(p.audioEl){p.audioEl.pause();p.audioEl.srcObject=null}
       if(p.pc)try{p.pc.close()}catch(_){}
       if(p.dc)try{p.dc.close()}catch(_){}
@@ -1050,6 +1110,7 @@
       const pid=crypto.randomUUID().slice(0,8);
       S.peers.set(pid,{name:null,joinTime:0,muted:false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
       pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(pid,e.streams[0])};
+      monitorPc(pid,pc);
       setupDc(pid,dc);
       S.helloSent.add(pid);
       dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
@@ -1070,7 +1131,7 @@
       try{
         await initAudio();
         const decoded=await decodeSdp(code);
-        const pc=makePc();addTracks(pc);
+        const pc=makePc();addTracks(pc);const _joinerPcRef=pc;
         let dcResolve;const dcPromise=new Promise(r=>dcResolve=r);
         pc.ondatachannel=e=>{dcResolve(e.channel)};
         pc.ontrack=e=>{if(e.streams[0]){
@@ -1100,8 +1161,9 @@
                 clearTimeout(t);
                 S.hostId=msg.id;
                 const pid=msg.id;
-                S.peers.set(pid,{name:msg.name,joinTime:msg.time,muted:msg.m||false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
+                S.peers.set(pid,{name:msg.name,joinTime:msg.time,muted:msg.m||false,speaking:false,dc,pc:_joinerPcRef,audioEl:null,an:null,anD:null,speakT:null});
                 if(S._pendingStream){setupRemoteAudio(pid,S._pendingStream);S._pendingStream=null}
+                monitorPc(pid,_joinerPcRef);
                 setupDc(pid,dc);
                 S.helloSent.add(pid);
                 dc.send(JSON.stringify({t:'hello',id:S.myId,name:S.name,time:S.joinTime,m:S.muted,q:S.audioQ}));
@@ -1176,6 +1238,7 @@
         const pid=crypto.randomUUID().slice(0,8);
         S.peers.set(pid,{name:null,joinTime:0,muted:false,speaking:false,dc,pc,audioEl:null,an:null,anD:null,speakT:null});
         pc.ontrack=e=>{if(e.streams[0])setupRemoteAudio(pid,e.streams[0])};
+        monitorPc(pid,pc);
         setupDc(pid,dc);
         if(!S.helloSent.has(pid)){
           S.helloSent.add(pid);

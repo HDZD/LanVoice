@@ -1043,7 +1043,9 @@
       ROOM_PREFIX: 'lv-',
       SPEAKING_THRESHOLD: 12,
       SPEAKING_RELEASE_MS: 350,
-      HEARTBEAT_INTERVAL: 15000,
+      HEARTBEAT_INTERVAL: 5000,
+      HEARTBEAT_TIMEOUT: 15000,
+      DISCONNECT_GRACE: 8000,
       STAR_THRESHOLD: 5,
       SPEAK_BROADCAST_HZ: 6,
       JOIN_TIMEOUT: 12000,
@@ -1493,6 +1495,55 @@
     }
 
     /* ===========================================
+       CONNECTION MONITORING — Auto-disconnect
+       =========================================== */
+    function monitorPeerConnection(peerId, peerConnection) {
+      if (!peerConnection) return;
+      peerConnection.addEventListener('connectionstatechange', () => {
+        const connState = peerConnection.connectionState;
+        const p = state.peers.get(peerId);
+        if (!p) return;
+        if (connState === 'disconnected') {
+          // Grace period — WebRTC may recover
+          if (!p._disconnGrace) {
+            p._disconnGrace = setTimeout(() => {
+              p._disconnGrace = null;
+              const curState = peerConnection.connectionState;
+              if (curState === 'disconnected' || curState === 'failed') handlePeerDisconnect(peerId);
+            }, CONFIG.DISCONNECT_GRACE);
+          }
+        } else if (connState === 'failed') {
+          clearTimeout(p._disconnGrace); p._disconnGrace = null;
+          handlePeerDisconnect(peerId);
+        } else if (connState === 'connected') {
+          clearTimeout(p._disconnGrace); p._disconnGrace = null;
+        }
+      });
+    }
+
+    function startHeartbeat(peerId) {
+      const p = state.peers.get(peerId); if (!p) return;
+      clearInterval(p._hbInterval); clearTimeout(p._hbTimeout);
+      p._lastHbResponse = Date.now();
+      p._hbInterval = setInterval(() => {
+        const pr = state.peers.get(peerId);
+        if (!pr || !pr.dataConn?.open) { clearInterval(pr?._hbInterval); return; }
+        try { pr.dataConn.send({ type: 'hb' }); } catch(_) {}
+        // Check if we've timed out
+        if (Date.now() - pr._lastHbResponse > CONFIG.HEARTBEAT_TIMEOUT) {
+          clearInterval(pr._hbInterval); pr._hbInterval = null;
+          handlePeerDisconnect(peerId);
+        }
+      }, CONFIG.HEARTBEAT_INTERVAL);
+    }
+
+    function stopHeartbeat(peerId) {
+      const p = state.peers.get(peerId); if (!p) return;
+      clearInterval(p._hbInterval); p._hbInterval = null;
+      clearTimeout(p._hbTimeout); p._hbTimeout = null;
+    }
+
+    /* ===========================================
        PEERJS / SIGNALING
        =========================================== */
     function createPersonalPeer() {
@@ -1613,6 +1664,9 @@
             speakTimeout: null,
           });
         }
+        // Start heartbeat & monitor underlying RTCPeerConnection
+        startHeartbeat(peerId);
+        if (conn.peerConnection) monitorPeerConnection(peerId, conn.peerConnection);
       });
 
       conn.on('data', (data) => handlePeerMessage(peerId, data));
@@ -1698,6 +1752,10 @@
       });
 
       dataConn.on('open', () => {
+        // Start heartbeat & monitor underlying RTCPeerConnection
+        startHeartbeat(peerId);
+        if (dataConn.peerConnection) monitorPeerConnection(peerId, dataConn.peerConnection);
+
         // Send hello
         state.helloSent.add(peerId);
         dataConn.send({
@@ -1796,6 +1854,19 @@
           if (state.topology === 'star' && state.starHostId === state.myPeerId) {
             starRelay(peerId, data);
           }
+          break;
+
+        case 'bye':
+          handlePeerDisconnect(peerId);
+          break;
+
+        case 'hb':
+          if (peer) peer._lastHbResponse = Date.now();
+          if (peer?.dataConn?.open) try { peer.dataConn.send({ type: 'hb-ack' }); } catch(_) {}
+          break;
+
+        case 'hb-ack':
+          if (peer) peer._lastHbResponse = Date.now();
           break;
 
         case 'host-changed': {
@@ -1907,7 +1978,11 @@
         }
       }
 
-      // Clean up
+      // Clean up heartbeat & disconnect timers
+      stopHeartbeat(peerId);
+      clearTimeout(peer._disconnGrace); peer._disconnGrace = null;
+
+      // Clean up connections
       if (peer.audioEl) { peer.audioEl.pause(); peer.audioEl.srcObject = null; }
       if (peer.mediaConn) { try { peer.mediaConn.close(); } catch(_) {} }
       if (peer.dataConn) { try { peer.dataConn.close(); } catch(_) {} }
@@ -2463,6 +2538,10 @@
       peer.dataConn = dataConn;
 
       dataConn.on('open', () => {
+        // Start heartbeat & monitor underlying RTCPeerConnection
+        startHeartbeat(peerId);
+        if (dataConn.peerConnection) monitorPeerConnection(peerId, dataConn.peerConnection);
+
         state.helloSent.add(peerId);
         dataConn.send({
           type: 'hello',
@@ -2563,6 +2642,8 @@
 
       // Close all peer connections
       for (const [pid, p] of state.peers) {
+        stopHeartbeat(pid);
+        clearTimeout(p._disconnGrace); p._disconnGrace = null;
         if (p.audioEl) { p.audioEl.pause(); p.audioEl.srcObject = null; }
         if (p.mediaConn) { try { p.mediaConn.close(); } catch(_) {} }
         if (p.dataConn) { try { p.dataConn.close(); } catch(_) {} }
