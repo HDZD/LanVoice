@@ -122,15 +122,6 @@ WebRTC mandates encryption — it cannot be disabled:
 | Firefox | 80+ | 113+ (needs `CompressionStream`) |
 | Safari | 14.1+ | 16.4+ (needs `CompressionStream`) |
 
-## 🚀 Deploy to GitHub Pages
-
-1. Create a GitHub repository
-2. Push all files (`index.html`, `zero-dep/index.html`, `README.md`)
-3. Go to **Settings → Pages → Source: Deploy from a branch → main → / (root)**
-4. Your app will be live at `https://<username>.github.io/<repo>/`
-
-> **Note:** `getUserMedia` (microphone access) requires a secure context — GitHub Pages serves over HTTPS automatically.
-
 ## 💖 Support
 
 If you find WebVoice useful, consider [buying me a coffee](https://hdzd.github.io/donate/)!
